@@ -1,0 +1,8 @@
+.next
+node_modules
+data/*.db
+data/*.db-*
+.env
+.DS_Store
+dist
+*.tsbuildinfo
