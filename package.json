@@ -10,6 +10,7 @@
     "start": "node ./node_modules/next/dist/bin/next start",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "test": "node --import tsx/esm --test tests/**/*.test.ts",
     "db:migrate": "node --import tsx/esm src/lib/db/migrate.ts",
     "db:seed": "node --import tsx/esm src/lib/db/seed.ts"
   },

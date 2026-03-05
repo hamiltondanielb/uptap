@@ -15,6 +15,7 @@ This repo is bootstrapped for offline work in the current environment:
 ```bash
 ./scripts/dev.sh
 ./scripts/typecheck.sh
+./scripts/test.sh
 ./scripts/db-seed.sh
 ```
 
@@ -29,4 +30,3 @@ pnpm install
 ```
 
 Then the project can operate as a normal standalone repo.
-

@@ -289,8 +289,6 @@ async function seedDemoData() {
     return;
   }
 
-  await db.insert(cardPrintsCache).values(demoPrints);
-
   await db.insert(collectionItems).values([
     {
       id: "owned-raffine",
