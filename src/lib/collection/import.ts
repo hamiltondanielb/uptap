@@ -81,6 +81,30 @@ type ImportJobDetail = {
   }>;
 };
 
+export async function resolvePreviewImportRawInput(input: {
+  sourceTypeInput: string;
+  rawInput: string;
+  fileInput?: FormDataEntryValue | null;
+}) {
+  const sourceType = sourceTypeSchema.parse(input.sourceTypeInput);
+
+  if (input.fileInput instanceof File && input.fileInput.size > 0) {
+    try {
+      return {
+        sourceType: "csv" as const,
+        raw: (await input.fileInput.text()).trim()
+      };
+    } catch {
+      throw new Error("Unable to read uploaded CSV file.");
+    }
+  }
+
+  return {
+    sourceType,
+    raw: input.rawInput.trim()
+  };
+}
+
 function parseFinish(input: string | undefined): Finish | undefined {
   const value = input?.trim().toLowerCase();
   if (!value) {
@@ -172,8 +196,8 @@ function parseCsvImport(raw: string): ParsedImportRow[] {
   const header = parseCsvLine(lines[0]).map((cell) => cell.toLowerCase());
   const quantityIndex = findHeaderIndex(header, ["quantity", "qty", "count", "copies"]);
   const nameIndex = findHeaderIndex(header, ["name", "card", "card_name", "cardname"]);
-  const setCodeIndex = findHeaderIndex(header, ["set", "set_code", "setcode"]);
-  const collectorNumberIndex = findHeaderIndex(header, ["collector_number", "collector", "collector_no", "cn"]);
+  const setCodeIndex = findHeaderIndex(header, ["set", "set_code", "setcode", "edition"]);
+  const collectorNumberIndex = findHeaderIndex(header, ["collector_number", "collector number", "collector", "collector_no", "cn"]);
   const finishIndex = findHeaderIndex(header, ["finish", "foil", "printing"]);
 
   if (nameIndex < 0) {

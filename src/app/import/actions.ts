@@ -6,25 +6,31 @@ import { redirect } from "next/navigation";
 import {
   commitImportJob,
   previewCollectionImport,
+  resolvePreviewImportRawInput,
   resolveAmbiguousRowsBySet,
   resolveImportRow,
   searchAndCacheAllFailedRows,
   searchAndCacheImportRowCandidates
 } from "@/lib/collection/import";
 
+const importPath = "/import";
+
 export async function previewImportAction(formData: FormData) {
-  const sourceType = String(formData.get("sourceType") ?? "plaintext");
-  const raw = String(formData.get("raw") ?? "");
+  const previewInput = await resolvePreviewImportRawInput({
+    sourceTypeInput: String(formData.get("sourceType") ?? "plaintext"),
+    rawInput: String(formData.get("raw") ?? ""),
+    fileInput: formData.get("file")
+  });
 
   let jobId = "";
   try {
-    jobId = await previewCollectionImport(sourceType, raw);
+    jobId = await previewCollectionImport(previewInput.sourceType, previewInput.raw);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to preview import.";
-    redirect(`/collection/import?error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${jobId}`);
+  redirect(`${importPath}?job=${jobId}`);
 }
 
 export async function commitImportAction(formData: FormData) {
@@ -43,13 +49,13 @@ export async function commitImportAction(formData: FormData) {
     });
 
     revalidatePath("/collection");
-    revalidatePath("/collection/import");
+    revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to commit import.";
-    redirect(`/collection/import?job=${jobId}&error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${committedJobId}&committed=1`);
+  redirect(`${importPath}?job=${committedJobId}&committed=1`);
 }
 
 export async function resolveImportRowAction(formData: FormData) {
@@ -59,13 +65,13 @@ export async function resolveImportRowAction(formData: FormData) {
 
   try {
     await resolveImportRow({ jobId, rowId, printId });
-    revalidatePath("/collection/import");
+    revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to resolve import row.";
-    redirect(`/collection/import?job=${jobId}&error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${jobId}`);
+  redirect(`${importPath}?job=${jobId}`);
 }
 
 export async function searchImportRowCandidatesAction(formData: FormData) {
@@ -74,13 +80,13 @@ export async function searchImportRowCandidatesAction(formData: FormData) {
 
   try {
     await searchAndCacheImportRowCandidates({ jobId, rowId });
-    revalidatePath("/collection/import");
+    revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to search Scryfall for this row.";
-    redirect(`/collection/import?job=${jobId}&error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${jobId}`);
+  redirect(`${importPath}?job=${jobId}`);
 }
 
 export async function searchAllFailedRowsAction(formData: FormData) {
@@ -88,13 +94,13 @@ export async function searchAllFailedRowsAction(formData: FormData) {
 
   try {
     await searchAndCacheAllFailedRows(jobId);
-    revalidatePath("/collection/import");
+    revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to search all failed rows.";
-    redirect(`/collection/import?job=${jobId}&error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${jobId}`);
+  redirect(`${importPath}?job=${jobId}`);
 }
 
 export async function resolveAmbiguousRowsBySetAction(formData: FormData) {
@@ -103,11 +109,11 @@ export async function resolveAmbiguousRowsBySetAction(formData: FormData) {
 
   try {
     await resolveAmbiguousRowsBySet({ jobId, setCode });
-    revalidatePath("/collection/import");
+    revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to bulk resolve ambiguous rows.";
-    redirect(`/collection/import?job=${jobId}&error=${encodeURIComponent(message)}`);
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 
-  redirect(`/collection/import?job=${jobId}`);
+  redirect(`${importPath}?job=${jobId}`);
 }

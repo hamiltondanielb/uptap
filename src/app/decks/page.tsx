@@ -1,10 +1,16 @@
 import Link from "next/link";
 
+import { deleteDeckAction } from "@/app/decks/actions";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDeckSummaries } from "@/lib/decks/service";
 
-export default async function DecksPage() {
+export default async function DecksPage({
+  searchParams
+}: {
+  searchParams?: { deleted?: string; error?: string };
+}) {
   const decks = await getDeckSummaries();
 
   return (
@@ -18,6 +24,20 @@ export default async function DecksPage() {
           Create deck
         </Link>
       </section>
+
+      {searchParams?.deleted ? (
+        <Card className="border-emerald-300/70 bg-emerald-50">
+          <CardContent className="p-4 text-sm text-emerald-900">
+            Deleted {decodeURIComponent(searchParams.deleted)}.
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.error ? (
+        <Card className="border-amber-300/70 bg-amber-50">
+          <CardContent className="p-4 text-sm text-amber-900">{decodeURIComponent(searchParams.error)}</CardContent>
+        </Card>
+      ) : null}
 
       <section className="grid gap-5">
         {decks.map((deck) => (
@@ -42,11 +62,23 @@ export default async function DecksPage() {
                   </Badge>
                 ))}
               </div>
-              <div className="flex items-center gap-6 text-sm text-muted-foreground">
+              <div className="flex items-center gap-4 text-sm text-muted-foreground">
                 <span>{deck.totalCards} tracked cards</span>
                 <Link className="font-medium text-primary" href={`/decks/${deck.id}`}>
                   Open editor
                 </Link>
+                <form action={deleteDeckAction}>
+                  <input name="deckId" type="hidden" value={deck.id} />
+                  <input name="returnTo" type="hidden" value="list" />
+                  <ConfirmSubmitButton
+                    confirmMessage={`Delete ${deck.name}? This removes the deck and all of its entries.`}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Delete deck
+                  </ConfirmSubmitButton>
+                </form>
               </div>
             </CardContent>
           </Card>

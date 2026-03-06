@@ -1,22 +1,23 @@
-import Link from "next/link";
-import { ArrowUpRight, Search } from "lucide-react";
-
-import { updateCollectionBucketAction } from "@/app/collection/actions";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { CollectionFilters } from "@/components/collection/collection-filters";
+import { CollectionInventoryTable } from "@/components/collection/collection-inventory-table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { collectionConditions, collectionFinishes, getCollectionSnapshot } from "@/lib/collection/service";
-import { cn } from "@/lib/utils";
+import { buildCollectionFilterSearchParams, normalizeCollectionSnapshotFilters } from "@/lib/collection/filters";
+import { getCollectionSnapshot } from "@/lib/collection/service";
+import { getDeckSummaries } from "@/lib/decks/service";
 
 export default async function CollectionPage({
   searchParams
 }: {
-  searchParams?: { q?: string; updated?: string; error?: string };
+  searchParams?: { q?: string; updated?: string; deleted?: string; error?: string; deckFilterMode?: string; deckId?: string };
 }) {
-  const query = searchParams?.q?.trim() ?? "";
-  const snapshot = await getCollectionSnapshot(query);
+  const filters = normalizeCollectionSnapshotFilters({
+    query: searchParams?.q,
+    deckFilterMode: searchParams?.deckFilterMode,
+    deckId: searchParams?.deckId
+  });
+  const [snapshot, decks] = await Promise.all([getCollectionSnapshot(filters), getDeckSummaries()]);
+  const filterSearchParams = buildCollectionFilterSearchParams(filters);
+  const exportHref = `/collection/export${filterSearchParams.size > 0 ? `?${filterSearchParams.toString()}` : ""}`;
 
   return (
     <div className="space-y-6">
@@ -29,25 +30,25 @@ export default async function CollectionPage({
             without leaving the page.
           </p>
         </div>
-        <div className="flex w-full max-w-3xl flex-col gap-3 md:items-end">
-          <form className="w-full max-w-md">
-            <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-              <Input className="pl-9" defaultValue={query} name="q" placeholder="Search by card, set, or collector number" />
-            </label>
-          </form>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }), "w-full md:w-auto")}
-            href={`/collection/export${query ? `?q=${encodeURIComponent(query)}` : ""}`}
-          >
-            Export filtered CSV
-          </Link>
-        </div>
+        <CollectionFilters
+          clearHref="/collection"
+          deckFilterMode={filters.deckFilterMode}
+          deckId={filters.deckId}
+          decks={decks.map((deck) => ({ id: deck.id, name: deck.name }))}
+          exportHref={exportHref}
+          query={filters.query}
+        />
       </section>
 
       {searchParams?.updated === "1" ? (
         <Card className="border-emerald-300/70 bg-emerald-50">
           <CardContent className="p-4 text-sm text-emerald-900">Collection bucket updated.</CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.deleted === "1" ? (
+        <Card className="border-emerald-300/70 bg-emerald-50">
+          <CardContent className="p-4 text-sm text-emerald-900">Collection items deleted.</CardContent>
         </Card>
       ) : null}
 
@@ -87,112 +88,15 @@ export default async function CollectionPage({
       <Card>
         <CardHeader>
           <CardTitle>Inventory table</CardTitle>
-          <CardDescription>
-            Quantities are grouped by exact print ownership buckets instead of collapsing to name-only counts.
-          </CardDescription>
+          <CardDescription>Browse the exact prints you own, then open a print to edit buckets and inspect deck usage.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Card</TableHead>
-                <TableHead>Print</TableHead>
-                <TableHead>Edit Bucket</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {snapshot.items.map((item) => (
-                <TableRow key={item.bucketId}>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <p className="font-medium">{item.name}</p>
-                      <div className="flex flex-wrap gap-2">
-                        {item.colors.length > 0 ? (
-                          item.colors.map((color) => (
-                            <Badge key={color} variant="outline">
-                              {color}
-                            </Badge>
-                          ))
-                        ) : (
-                          <Badge variant="outline">Colorless</Badge>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Link className="inline-flex items-center gap-2 font-medium text-primary" href={`/collection/card/${item.printId}`}>
-                      {item.setCode} #{item.collectorNumber}
-                      <ArrowUpRight className="h-4 w-4" />
-                    </Link>
-                    <p className="mt-1 text-xs text-muted-foreground">{item.setName}</p>
-                  </TableCell>
-                  <TableCell>
-                    <form action={updateCollectionBucketAction} className="grid gap-3 md:grid-cols-[100px_110px_150px_180px_auto]">
-                      <input name="bucketId" type="hidden" value={item.bucketId} />
-                      <input name="query" type="hidden" value={query} />
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Total</span>
-                        <Input defaultValue={String(item.quantityTotal)} min="0" name="quantityTotal" type="number" />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Available</span>
-                        <Input defaultValue={String(item.quantityAvailable)} min="0" name="quantityAvailable" type="number" />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Finish</span>
-                        <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                          defaultValue={item.finish}
-                          name="finish"
-                        >
-                          {collectionFinishes.map((finish) => (
-                            <option key={finish} value={finish}>
-                              {finish}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Condition</span>
-                        <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                          defaultValue={item.condition}
-                          name="condition"
-                        >
-                          {collectionConditions.map((condition) => (
-                            <option key={condition} value={condition}>
-                              {condition.replaceAll("_", " ")}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end md:col-span-5">
-                        <label className="space-y-1 text-xs">
-                          <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Location</span>
-                          <Input defaultValue={item.location ?? ""} name="location" placeholder="Binder, staples box, deckbox drawer..." />
-                        </label>
-                        <Button type="submit" variant="outline">
-                          Save
-                        </Button>
-                      </div>
-                    </form>
-                  </TableCell>
-                  <TableCell>
-                    <div className="space-y-2">
-                      <Badge variant="outline">
-                        {item.finish} · {item.condition.replaceAll("_", " ")}
-                      </Badge>
-                      <Badge variant={item.quantityAvailable > 0 ? "success" : "warning"}>
-                        {item.quantityAvailable}/{item.quantityTotal} free
-                      </Badge>
-                      <p className="text-sm text-muted-foreground">{item.location ?? "Unassigned"}</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <CollectionInventoryTable
+            deckFilterMode={filters.deckFilterMode}
+            deckId={filters.deckId}
+            items={snapshot.items}
+            query={filters.query}
+          />
         </CardContent>
       </Card>
     </div>

@@ -6,6 +6,8 @@ import { cardPrintsCache, collectionItems, deckEntries, decks, deckTags, tags } 
 declare global {
   // eslint-disable-next-line no-var
   var __untapBootstrapped: boolean | undefined;
+  // eslint-disable-next-line no-var
+  var __untapBootstrapPromise: Promise<void> | undefined;
 }
 
 function createTables() {
@@ -410,9 +412,15 @@ export async function initializeAppData() {
     return;
   }
 
-  createTables();
-  await seedDemoData();
-  globalThis.__untapBootstrapped = true;
+  if (!globalThis.__untapBootstrapPromise) {
+    globalThis.__untapBootstrapPromise = (async () => {
+      createTables();
+      await seedDemoData();
+      globalThis.__untapBootstrapped = true;
+    })();
+  }
+
+  await globalThis.__untapBootstrapPromise;
 }
 
 export async function resetCollectionAvailability(printId: string, quantityAvailable: number) {

@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 import { initializeAppData } from "@/lib/db/bootstrap";
 import { db } from "@/lib/db/client";
+import {
+  collectionFilterNeedsDeck,
+  normalizeCollectionSnapshotFilters,
+  type CollectionSnapshotFilters
+} from "@/lib/collection/filters";
 import { cardPrintsCache, collectionItems, deckEntries, decks } from "@/lib/db/schema";
 
 export type CollectionListItem = {
@@ -20,6 +25,7 @@ export type CollectionListItem = {
   location: string | null;
   imageUrl: string | null;
   colors: string[];
+  deckNames: string[];
 };
 
 function parseArray(value: string | null) {
@@ -34,8 +40,9 @@ function parseArray(value: string | null) {
   }
 }
 
-export async function getCollectionSnapshot(query = "") {
+export async function getCollectionSnapshot(filters: CollectionSnapshotFilters = {}) {
   await initializeAppData();
+  const normalized = normalizeCollectionSnapshotFilters(filters);
 
   const rows = await db
     .select({
@@ -57,18 +64,56 @@ export async function getCollectionSnapshot(query = "") {
     .from(collectionItems)
     .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id));
 
+  const deckUsageRows = await db
+    .select({
+      deckId: deckEntries.deckId,
+      printId: deckEntries.printId,
+      deckName: decks.name
+    })
+    .from(deckEntries)
+    .innerJoin(decks, eq(deckEntries.deckId, decks.id));
+  const printIdsInAnyDeck = new Set(deckUsageRows.map((row) => row.printId));
+  const selectedDeckPrintIds = new Set(
+    deckUsageRows.filter((row) => row.deckId === normalized.deckId).map((row) => row.printId)
+  );
+  const deckNamesByPrintId = deckUsageRows.reduce<Map<string, Set<string>>>((acc, row) => {
+    const names = acc.get(row.printId) ?? new Set<string>();
+    names.add(row.deckName);
+    acc.set(row.printId, names);
+    return acc;
+  }, new Map());
+  const canApplySelectedDeckFilter = collectionFilterNeedsDeck(normalized.deckFilterMode) && Boolean(normalized.deckId);
+
   const filtered = rows.filter((row) => {
-    if (!query) {
+    const matchesDeckFilter = (() => {
+      switch (normalized.deckFilterMode) {
+        case "in_deck":
+          return canApplySelectedDeckFilter ? selectedDeckPrintIds.has(row.printId) : true;
+        case "not_in_deck":
+          return canApplySelectedDeckFilter ? !selectedDeckPrintIds.has(row.printId) : true;
+        case "not_in_any_deck":
+          return !printIdsInAnyDeck.has(row.printId);
+        default:
+          return true;
+      }
+    })();
+
+    if (!matchesDeckFilter) {
+      return false;
+    }
+
+    if (!normalized.query) {
       return true;
     }
 
-    const needle = query.toLowerCase();
-    return `${row.name} ${row.setCode} ${row.setName}`.toLowerCase().includes(needle);
+    const needle = normalized.query.toLowerCase();
+    return `${row.name} ${row.setCode} ${row.setName} ${row.collectorNumber}`.toLowerCase().includes(needle);
   });
 
   const items: CollectionListItem[] = filtered.map((row) => ({
     ...row,
-    colors: parseArray(row.colors)
+    colors: parseArray(row.colors),
+    deckNames: [...(deckNamesByPrintId.get(row.printId) ?? new Set<string>())].sort((left, right) => left.localeCompare(right))
   })).sort((left, right) => left.name.localeCompare(right.name));
 
   return {
@@ -119,9 +164,14 @@ export async function updateCollectionBucket(input: {
 
   if (quantityTotal === 0) {
     await db.delete(collectionItems).where(eq(collectionItems.id, input.bucketId));
+    const remainingBuckets = await db
+      .select({ id: collectionItems.id })
+      .from(collectionItems)
+      .where(eq(collectionItems.printId, bucket.printId));
     return {
       printId: bucket.printId,
-      deleted: true
+      deleted: true,
+      printStillOwned: remainingBuckets.length > 0
     };
   }
 
@@ -139,7 +189,8 @@ export async function updateCollectionBucket(input: {
 
   return {
     printId: bucket.printId,
-    deleted: false
+    deleted: false,
+    printStillOwned: true
   };
 }
 
@@ -200,10 +251,60 @@ export async function addCollectionBucketFromPrint(input: {
   };
 }
 
+export async function deleteCollectionPrint(printId: string) {
+  await initializeAppData();
+
+  const buckets = await db
+    .select({
+      id: collectionItems.id
+    })
+    .from(collectionItems)
+    .where(eq(collectionItems.printId, printId));
+
+  if (buckets.length === 0) {
+    throw new Error("Collection print not found.");
+  }
+
+  await db.delete(collectionItems).where(eq(collectionItems.printId, printId));
+
+  return {
+    printId,
+    deletedBuckets: buckets.length
+  };
+}
+
+export async function deleteCollectionBuckets(bucketIds: string[]) {
+  await initializeAppData();
+
+  const uniqueBucketIds = [...new Set(bucketIds.map((bucketId) => bucketId.trim()).filter(Boolean))];
+  if (uniqueBucketIds.length === 0) {
+    throw new Error("No collection rows selected.");
+  }
+
+  const buckets = await db
+    .select({
+      id: collectionItems.id,
+      printId: collectionItems.printId
+    })
+    .from(collectionItems)
+    .where(inArray(collectionItems.id, uniqueBucketIds));
+
+  if (buckets.length === 0) {
+    throw new Error("Selected collection rows were not found.");
+  }
+
+  await db.delete(collectionItems).where(inArray(collectionItems.id, buckets.map((bucket) => bucket.id)));
+
+  return {
+    deletedBuckets: buckets.length,
+    printIds: [...new Set(buckets.map((bucket) => bucket.printId))]
+  };
+}
+
 export async function getCollectionPrintDetail(printId: string) {
   await initializeAppData();
 
-  const [owned] = await db
+  const [print] = await db
     .select({
       printId: cardPrintsCache.id,
       name: cardPrintsCache.name,
@@ -214,6 +315,17 @@ export async function getCollectionPrintDetail(printId: string) {
       oracleText: cardPrintsCache.oracleText,
       imageUrl: cardPrintsCache.imageNormal,
       manaCost: cardPrintsCache.manaCost,
+    })
+    .from(cardPrintsCache)
+    .where(eq(cardPrintsCache.id, printId));
+
+  if (!print) {
+    return null;
+  }
+
+  const ownedBuckets = await db
+    .select({
+      id: collectionItems.id,
       finish: collectionItems.finish,
       condition: collectionItems.condition,
       quantityTotal: collectionItems.quantityTotal,
@@ -222,10 +334,9 @@ export async function getCollectionPrintDetail(printId: string) {
       notes: collectionItems.notes
     })
     .from(collectionItems)
-    .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id))
     .where(eq(collectionItems.printId, printId));
 
-  if (!owned) {
+  if (ownedBuckets.length === 0) {
     return null;
   }
 
@@ -241,7 +352,19 @@ export async function getCollectionPrintDetail(printId: string) {
     .where(eq(deckEntries.printId, printId));
 
   return {
-    owned,
+    print,
+    ownedBuckets: ownedBuckets.sort((left, right) => {
+      if (left.location !== right.location) {
+        return (left.location ?? "").localeCompare(right.location ?? "");
+      }
+
+      return left.finish.localeCompare(right.finish);
+    }),
+    summary: {
+      totalCopies: ownedBuckets.reduce((sum, bucket) => sum + bucket.quantityTotal, 0),
+      availableCopies: ownedBuckets.reduce((sum, bucket) => sum + bucket.quantityAvailable, 0),
+      bucketCount: ownedBuckets.length
+    },
     usedInDecks
   };
 }

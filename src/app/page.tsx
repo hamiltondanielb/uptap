@@ -16,7 +16,9 @@ export default async function HomePage() {
       <section className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
         <Card className="overflow-hidden border-none bg-slate-950 text-slate-50">
           <CardHeader className="relative gap-5">
-            <Badge className="w-fit bg-amber-500/15 text-amber-100">Moxfield-style, collection-first</Badge>
+            <Badge className="w-fit" variant="warning">
+              Moxfield-style, collection-first
+            </Badge>
             <div className="space-y-4">
               <CardTitle className="max-w-3xl text-5xl leading-tight">
                 Untap keeps the deck builder, but treats your collection like a real inventory system.
@@ -135,4 +137,3 @@ export default async function HomePage() {
     </div>
   );
 }
-

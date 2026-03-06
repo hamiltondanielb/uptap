@@ -4,13 +4,17 @@ import { notFound } from "next/navigation";
 
 import {
   addDeckEntryAction,
+  addDeckPrintToCollectionAction,
   cacheAndSetDeckCommanderFromSearchAction,
+  deleteDeckAction,
   removeDeckEntryAction,
   setDeckCommanderAction,
   setDeckEntryQuantityAction,
   updateDeckEntrySectionAction,
   updateDeckMetaAction
 } from "@/app/decks/actions";
+import { DeckBulkPaste } from "@/components/decks/deck-bulk-paste";
+import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -47,7 +51,7 @@ export default async function DeckDetailPage({
   searchParams
 }: {
   params: { deckId: string };
-  searchParams?: { q?: string; cq?: string; saved?: string; error?: string };
+  searchParams?: { q?: string; cq?: string; saved?: string; error?: string; collectionAdded?: string };
 }) {
   const detail = await getDeckDetail(params.deckId);
   if (!detail) {
@@ -93,12 +97,30 @@ export default async function DeckDetailPage({
           >
             Export CSV
           </Link>
+          <form action={deleteDeckAction}>
+            <input name="deckId" type="hidden" value={detail.deck.id} />
+            <input name="returnTo" type="hidden" value="detail" />
+            <ConfirmSubmitButton
+              className="h-8 px-3 text-xs"
+              confirmMessage={`Delete ${detail.deck.name}? This removes the deck and all of its entries.`}
+              type="button"
+              variant="ghost"
+            >
+              Delete deck
+            </ConfirmSubmitButton>
+          </form>
         </div>
       </section>
 
       {searchParams?.saved === "1" ? (
         <Card className="border-emerald-300/70 bg-emerald-50">
           <CardContent className="p-4 text-sm text-emerald-900">Deck metadata saved.</CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.collectionAdded === "1" ? (
+        <Card className="border-emerald-300/70 bg-emerald-50">
+          <CardContent className="p-4 text-sm text-emerald-900">Card added to the collection with default details.</CardContent>
         </Card>
       ) : null}
 
@@ -384,7 +406,116 @@ export default async function DeckDetailPage({
         </CardContent>
       </Card>
 
-      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+      <Card>
+        <CardHeader>
+          <CardTitle>Deck editor</CardTitle>
+          <CardDescription>Every entry can be moved, resized, or removed without leaving the page.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {detail.groupedEntries.map((group) =>
+            group.entries.length > 0 ? (
+              <div key={group.section} className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium">{prettySection(group.section)}</h3>
+                  <Badge variant="outline">
+                    {group.entries.reduce((sum, entry) => sum + entry.quantity, 0)} cards
+                  </Badge>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Card</TableHead>
+                      <TableHead>Qty</TableHead>
+                      <TableHead>Available</TableHead>
+                      <TableHead>Section</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {group.entries.map((entry) => (
+                      <TableRow key={entry.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{entry.name}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {entry.setCode} #{entry.collectorNumber}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <form action={setDeckEntryQuantityAction} className="flex items-center gap-2">
+                            <input name="deckId" type="hidden" value={detail.deck.id} />
+                            <input name="entryId" type="hidden" value={entry.id} />
+                            <Input className="w-20" defaultValue={String(entry.quantity)} min="0" name="quantity" type="number" />
+                            <Button size="sm" type="submit" variant="outline">
+                              Set
+                            </Button>
+                          </form>
+                        </TableCell>
+                        <TableCell>{entry.available}</TableCell>
+                        <TableCell>
+                          <form action={updateDeckEntrySectionAction} className="flex items-center gap-2">
+                            <input name="deckId" type="hidden" value={detail.deck.id} />
+                            <input name="entryId" type="hidden" value={entry.id} />
+                            <select
+                              className="flex h-10 rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                              defaultValue={entry.section}
+                              name="section"
+                            >
+                              {deckSections.map((section) => (
+                                <option key={section} value={section}>
+                                  {prettySection(section)}
+                                </option>
+                              ))}
+                            </select>
+                            <Button size="sm" type="submit" variant="outline">
+                              Move
+                            </Button>
+                          </form>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={entry.shortfall > 0 ? "warning" : "success"}>
+                            {entry.shortfall > 0 ? `${entry.shortfall} short` : "Covered"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-2">
+                            {entry.owned === 0 ? (
+                              <form action={addDeckPrintToCollectionAction}>
+                                <input name="deckId" type="hidden" value={detail.deck.id} />
+                                <input name="printId" type="hidden" value={entry.printId} />
+                                <input name="query" type="hidden" value={query} />
+                                <input name="commanderQuery" type="hidden" value={commanderQuery} />
+                                <Button size="sm" type="submit" variant="outline">
+                                  Add to collection
+                                </Button>
+                              </form>
+                            ) : null}
+                            <form action={removeDeckEntryAction}>
+                              <input name="deckId" type="hidden" value={detail.deck.id} />
+                              <input name="entryId" type="hidden" value={entry.id} />
+                              <Button size="sm" type="submit" variant="ghost">
+                                Remove
+                              </Button>
+                            </form>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : null
+          )}
+
+          {detail.entries.length === 0 ? (
+            <p className="text-sm text-muted-foreground">This deck has no entries yet. Use the add tools below to start building it.</p>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <section className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle>Add cached prints</CardTitle>
@@ -472,101 +603,7 @@ export default async function DeckDetailPage({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Deck editor</CardTitle>
-            <CardDescription>Every entry can be moved, resized, or removed without leaving the page.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {detail.groupedEntries.map((group) =>
-              group.entries.length > 0 ? (
-                <div key={group.section} className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-medium">{prettySection(group.section)}</h3>
-                    <Badge variant="outline">
-                      {group.entries.reduce((sum, entry) => sum + entry.quantity, 0)} cards
-                    </Badge>
-                  </div>
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Card</TableHead>
-                        <TableHead>Qty</TableHead>
-                        <TableHead>Available</TableHead>
-                        <TableHead>Section</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {group.entries.map((entry) => (
-                        <TableRow key={entry.id}>
-                          <TableCell>
-                            <div>
-                              <p className="font-medium">{entry.name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {entry.setCode} #{entry.collectorNumber}
-                              </p>
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <form action={setDeckEntryQuantityAction} className="flex items-center gap-2">
-                              <input name="deckId" type="hidden" value={detail.deck.id} />
-                              <input name="entryId" type="hidden" value={entry.id} />
-                              <Input className="w-20" defaultValue={String(entry.quantity)} min="0" name="quantity" type="number" />
-                              <Button size="sm" type="submit" variant="outline">
-                                Set
-                              </Button>
-                            </form>
-                          </TableCell>
-                          <TableCell>{entry.available}</TableCell>
-                          <TableCell>
-                            <form action={updateDeckEntrySectionAction} className="flex items-center gap-2">
-                              <input name="deckId" type="hidden" value={detail.deck.id} />
-                              <input name="entryId" type="hidden" value={entry.id} />
-                              <select
-                                className="flex h-10 rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                                defaultValue={entry.section}
-                                name="section"
-                              >
-                                {deckSections.map((section) => (
-                                  <option key={section} value={section}>
-                                    {prettySection(section)}
-                                  </option>
-                                ))}
-                              </select>
-                              <Button size="sm" type="submit" variant="outline">
-                                Move
-                              </Button>
-                            </form>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={entry.shortfall > 0 ? "warning" : "success"}>
-                              {entry.shortfall > 0 ? `${entry.shortfall} short` : "Covered"}
-                            </Badge>
-                          </TableCell>
-                          <TableCell>
-                            <form action={removeDeckEntryAction}>
-                              <input name="deckId" type="hidden" value={detail.deck.id} />
-                              <input name="entryId" type="hidden" value={entry.id} />
-                              <Button size="sm" type="submit" variant="ghost">
-                                Remove
-                              </Button>
-                            </form>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              ) : null
-            )}
-
-            {detail.entries.length === 0 ? (
-              <p className="text-sm text-muted-foreground">This deck has no entries yet. Use cached search to add cards.</p>
-            ) : null}
-          </CardContent>
-        </Card>
+        <DeckBulkPaste deckId={detail.deck.id} defaultExpanded={false} sections={[...deckSections]} />
       </section>
     </div>
   );

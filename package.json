@@ -5,12 +5,13 @@
   "type": "module",
   "packageManager": "pnpm@10.9.0",
   "scripts": {
-    "dev": "node ./node_modules/next/dist/bin/next dev",
-    "build": "node ./node_modules/next/dist/bin/next build",
-    "start": "node ./node_modules/next/dist/bin/next start",
+    "dev": "./scripts/dev.sh",
+    "build": "./scripts/build.sh",
+    "start": "./scripts/dev.sh",
+    "start:prod": "./scripts/start.sh",
     "lint": "node ./node_modules/eslint/bin/eslint.js .",
-    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit",
-    "test": "node --import tsx/esm --test tests/**/*.test.ts",
+    "typecheck": "./scripts/typecheck.sh",
+    "test": "./scripts/test.sh",
     "db:migrate": "node --import tsx/esm src/lib/db/migrate.ts",
     "db:seed": "node --import tsx/esm src/lib/db/seed.ts"
   },

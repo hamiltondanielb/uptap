@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 
 import { AppShell } from "@/components/layout/app-shell";
 import "@/app/globals.css";
@@ -10,14 +9,11 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const pathname = headers().get("x-pathname") ?? "/";
-
   return (
     <html lang="en">
       <body>
-        <AppShell pathname={pathname}>{children}</AppShell>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );
 }
-

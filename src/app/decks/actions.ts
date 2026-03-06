@@ -3,9 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { addCollectionBucketFromPrint } from "@/lib/collection/service";
 import {
   addDeckEntry,
   createDeck,
+  deleteDeck,
   removeDeckEntry,
   setDeckCommander,
   setDeckEntryQuantity,
@@ -43,6 +45,23 @@ export async function createDeckAction(formData: FormData) {
 
   revalidatePath("/decks");
   redirect(`/decks/${deckId}`);
+}
+
+export async function deleteDeckAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const returnTo = String(formData.get("returnTo") ?? "detail");
+
+  let deletedDeckName = "";
+  try {
+    const result = await deleteDeck({ deckId });
+    deletedDeckName = result.deckName;
+  } catch (error) {
+    redirectWithError(returnTo === "list" ? "/decks" : `/decks/${deckId}`, error);
+  }
+
+  revalidatePath("/decks");
+  revalidatePath(`/decks/${deckId}`);
+  redirect(`/decks?deleted=${encodeURIComponent(deletedDeckName)}`);
 }
 
 export async function updateDeckMetaAction(formData: FormData) {
@@ -84,6 +103,41 @@ export async function addDeckEntryAction(formData: FormData) {
   revalidatePath("/decks");
   revalidatePath(`/decks/${deckId}`);
   redirect(`/decks/${deckId}?q=${encodeURIComponent(query)}`);
+}
+
+export async function addDeckPrintToCollectionAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const printId = String(formData.get("printId") ?? "");
+  const query = String(formData.get("query") ?? "");
+  const commanderQuery = String(formData.get("commanderQuery") ?? "");
+  const redirectParams = new URLSearchParams();
+
+  if (query) {
+    redirectParams.set("q", query);
+  }
+
+  if (commanderQuery) {
+    redirectParams.set("cq", commanderQuery);
+  }
+
+  try {
+    await addCollectionBucketFromPrint({
+      printId,
+      quantity: 1,
+      finish: "nonfoil",
+      condition: "near_mint",
+      location: ""
+    });
+  } catch (error) {
+    const path = `/decks/${deckId}${redirectParams.toString() ? `?${redirectParams.toString()}` : ""}`;
+    redirectWithError(path, error);
+  }
+
+  revalidatePath("/collection");
+  revalidatePath("/decks");
+  revalidatePath(`/decks/${deckId}`);
+  redirectParams.set("collectionAdded", "1");
+  redirect(`/decks/${deckId}?${redirectParams.toString()}`);
 }
 
 export async function setDeckEntryQuantityAction(formData: FormData) {

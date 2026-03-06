@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 
 import { initializeAppData } from "@/lib/db/bootstrap";
 import { db } from "@/lib/db/client";
@@ -22,6 +22,55 @@ const manaCurveBuckets = [
 const manaColors = ["W", "U", "B", "R", "G"] as const;
 
 type AvailabilityMap = Record<string, { total: number; available: number }>;
+
+type ParsedDeckPasteRow = {
+  lineNumber: number;
+  original: string;
+  quantity: number;
+  name: string;
+  setCode?: string;
+  collectorNumber?: string;
+};
+
+export type DeckBulkPastePreview = {
+  matchedRows: Array<{
+    lineNumber: number;
+    original: string;
+    quantity: number;
+    selectedPrintId: string;
+    name: string;
+    setCode?: string;
+    collectorNumber?: string;
+    candidatePrints: Array<{
+      id: string;
+      name: string;
+      setCode: string;
+      setName: string;
+      collectorNumber: string;
+      imageUrl: string | null;
+      owned: number;
+      available: number;
+      quantityInDeck: number;
+    }>;
+    matchSource: "deck" | "collection" | "cached";
+  }>;
+  unmatchedRows: Array<{
+    lineNumber: number;
+    original: string;
+    quantity: number;
+    name: string;
+    setCode?: string;
+    collectorNumber?: string;
+    reason: string;
+  }>;
+  summary: {
+    parsedRows: number;
+    matchedRows: number;
+    unmatchedRows: number;
+    matchedCards: number;
+    unmatchedCards: number;
+  };
+};
 
 function buildAvailabilityMap(items: Array<(typeof collectionItems.$inferSelect)>) {
   return items.reduce<AvailabilityMap>((acc, item) => {
@@ -53,6 +102,73 @@ function parseColors(value: string | null) {
   } catch {
     return [];
   }
+}
+
+function normalizeName(input: string) {
+  return input.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function parseDeckPaste(raw: string): ParsedDeckPasteRow[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line, index) => ({
+      original: line.trim(),
+      lineNumber: index + 1
+    }))
+    .filter((line) => line.original.length > 0)
+    .map(({ original, lineNumber }) => {
+      const parts = original.split("|").map((part) => part.trim());
+      const lead = parts[0] ?? "";
+      const match = lead.match(/^(\d+)x?\s+(.+)$/i);
+      const quantity = match ? Number.parseInt(match[1] ?? "1", 10) : 1;
+      const name = match ? match[2] ?? lead : lead;
+
+      return {
+        lineNumber,
+        original,
+        quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+        name,
+        setCode: parts[1] ? parts[1].toUpperCase() : undefined,
+        collectorNumber: parts[2] || undefined
+      };
+    });
+}
+
+function matchesDeckPasteRow(
+  row: Pick<ParsedDeckPasteRow, "name" | "setCode" | "collectorNumber">,
+  print: Pick<(typeof cardPrintsCache.$inferSelect), "name" | "setCode" | "collectorNumber">
+) {
+  if (normalizeName(row.name) !== normalizeName(print.name)) {
+    return false;
+  }
+
+  if (row.setCode && row.setCode !== print.setCode.toUpperCase()) {
+    return false;
+  }
+
+  if (row.collectorNumber && row.collectorNumber !== print.collectorNumber) {
+    return false;
+  }
+
+  return true;
+}
+
+function mapPreviewCandidate(
+  print: typeof cardPrintsCache.$inferSelect,
+  availability: AvailabilityMap,
+  quantityInDeck: Record<string, number>
+) {
+  return {
+    id: print.id,
+    name: print.name,
+    setCode: print.setCode,
+    setName: print.setName,
+    collectorNumber: print.collectorNumber,
+    imageUrl: print.imageSmall,
+    owned: availability[print.id]?.total ?? 0,
+    available: availability[print.id]?.available ?? 0,
+    quantityInDeck: quantityInDeck[print.id] ?? 0
+  };
 }
 
 function isLand(typeLine: string | null) {
@@ -309,6 +425,106 @@ export async function searchCachedPrints(query: string, deckId?: string) {
     }));
 }
 
+export async function previewDeckBulkPaste(input: { deckId: string; raw: string }): Promise<DeckBulkPastePreview> {
+  await initializeAppData();
+
+  const parsedRows = parseDeckPaste(input.raw);
+  if (parsedRows.length === 0) {
+    throw new Error("Paste at least one card line.");
+  }
+
+  const availability = await getAvailabilityMap();
+  const prints = await db.select().from(cardPrintsCache).orderBy(asc(cardPrintsCache.name));
+  const currentDeckEntries = await db
+    .select({
+      printId: deckEntries.printId,
+      quantity: deckEntries.quantity
+    })
+    .from(deckEntries)
+    .where(eq(deckEntries.deckId, input.deckId));
+
+  const quantityInDeck = currentDeckEntries.reduce<Record<string, number>>((acc, entry) => {
+    acc[entry.printId] = (acc[entry.printId] ?? 0) + entry.quantity;
+    return acc;
+  }, {});
+
+  const matchedRows: DeckBulkPastePreview["matchedRows"] = [];
+  const unmatchedRows: DeckBulkPastePreview["unmatchedRows"] = [];
+
+  for (const row of parsedRows) {
+    const candidates = prints.filter((print) => matchesDeckPasteRow(row, print));
+    const deckMatches = candidates.filter((print) => (quantityInDeck[print.id] ?? 0) > 0);
+    const collectionMatches = candidates.filter((print) => (availability[print.id]?.total ?? 0) > 0);
+
+    if (deckMatches.length > 0) {
+      matchedRows.push({
+        lineNumber: row.lineNumber,
+        original: row.original,
+        quantity: row.quantity,
+        selectedPrintId: deckMatches[0]?.id ?? "",
+        name: row.name,
+        setCode: row.setCode,
+        collectorNumber: row.collectorNumber,
+        candidatePrints: deckMatches.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
+        matchSource: "deck"
+      });
+      continue;
+    }
+
+    if (collectionMatches.length > 0) {
+      matchedRows.push({
+        lineNumber: row.lineNumber,
+        original: row.original,
+        quantity: row.quantity,
+        selectedPrintId: collectionMatches[0]?.id ?? "",
+        name: row.name,
+        setCode: row.setCode,
+        collectorNumber: row.collectorNumber,
+        candidatePrints: collectionMatches.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
+        matchSource: "collection"
+      });
+      continue;
+    }
+
+    if (candidates.length > 0) {
+      matchedRows.push({
+        lineNumber: row.lineNumber,
+        original: row.original,
+        quantity: row.quantity,
+        selectedPrintId: candidates[0]?.id ?? "",
+        name: row.name,
+        setCode: row.setCode,
+        collectorNumber: row.collectorNumber,
+        candidatePrints: candidates.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
+        matchSource: "cached"
+      });
+      continue;
+    }
+
+    unmatchedRows.push({
+      lineNumber: row.lineNumber,
+      original: row.original,
+      quantity: row.quantity,
+      name: row.name,
+      setCode: row.setCode,
+      collectorNumber: row.collectorNumber,
+      reason: "Not found in your local collection cache."
+    });
+  }
+
+  return {
+    matchedRows,
+    unmatchedRows,
+    summary: {
+      parsedRows: parsedRows.length,
+      matchedRows: matchedRows.length,
+      unmatchedRows: unmatchedRows.length,
+      matchedCards: matchedRows.reduce((sum, row) => sum + row.quantity, 0),
+      unmatchedCards: unmatchedRows.reduce((sum, row) => sum + row.quantity, 0)
+    }
+  };
+}
+
 export async function createDeck(input: {
   name: string;
   format: string;
@@ -327,6 +543,22 @@ export async function createDeck(input: {
   });
 
   return deckId;
+}
+
+export async function deleteDeck(input: { deckId: string }) {
+  await initializeAppData();
+
+  const [deck] = await db.select().from(decks).where(eq(decks.id, input.deckId));
+  if (!deck) {
+    throw new Error("Deck not found.");
+  }
+
+  await db.delete(decks).where(eq(decks.id, input.deckId));
+
+  return {
+    deckId: deck.id,
+    deckName: deck.name
+  };
 }
 
 export async function updateDeckMeta(input: {
@@ -399,6 +631,83 @@ export async function addDeckEntry(input: {
       updatedAt: new Date().toISOString()
     })
     .where(eq(decks.id, input.deckId));
+}
+
+export async function commitDeckBulkPaste(input: {
+  deckId: string;
+  section: string;
+  matchedRows: Array<{ printId: string; quantity: number }>;
+}) {
+  await initializeAppData();
+
+  if (!deckSections.includes(input.section as (typeof deckSections)[number])) {
+    throw new Error("Choose a valid section.");
+  }
+
+  const normalizedRows = input.matchedRows
+    .map((row) => ({
+      printId: row.printId,
+      quantity: Number.isFinite(row.quantity) && row.quantity > 0 ? Math.floor(row.quantity) : 0
+    }))
+    .filter((row) => row.printId && row.quantity > 0);
+
+  if (normalizedRows.length === 0) {
+    throw new Error("No matched rows to add.");
+  }
+
+  const uniquePrintIds = [...new Set(normalizedRows.map((row) => row.printId))];
+  const existingPrints = await db
+    .select({ id: cardPrintsCache.id })
+    .from(cardPrintsCache)
+    .where(inArray(cardPrintsCache.id, uniquePrintIds));
+
+  if (existingPrints.length !== uniquePrintIds.length) {
+    throw new Error("One or more matched prints are no longer cached.");
+  }
+
+  const quantitiesByPrint = normalizedRows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.printId] = (acc[row.printId] ?? 0) + row.quantity;
+    return acc;
+  }, {});
+
+  const existingEntries = await db
+    .select()
+    .from(deckEntries)
+    .where(eq(deckEntries.deckId, input.deckId));
+
+  for (const [printId, quantity] of Object.entries(quantitiesByPrint)) {
+    const existingEntry = existingEntries.find((entry) => entry.printId === printId && entry.section === input.section);
+
+    if (existingEntry) {
+      await db
+        .update(deckEntries)
+        .set({
+          quantity: existingEntry.quantity + quantity
+        })
+        .where(eq(deckEntries.id, existingEntry.id));
+      continue;
+    }
+
+    await db.insert(deckEntries).values({
+      id: randomUUID(),
+      deckId: input.deckId,
+      printId,
+      quantity,
+      section: input.section
+    });
+  }
+
+  await db
+    .update(decks)
+    .set({
+      updatedAt: new Date().toISOString()
+    })
+    .where(eq(decks.id, input.deckId));
+
+  return {
+    addedRows: normalizedRows.length,
+    addedCards: normalizedRows.reduce((sum, row) => sum + row.quantity, 0)
+  };
 }
 
 export async function setDeckEntryQuantity(input: { deckId: string; entryId: string; quantity: number }) {

@@ -13,13 +13,19 @@ This repo is bootstrapped for offline work in the current environment:
 ## Commands
 
 ```bash
+pnpm start
+pnpm dev
+pnpm start:prod
+
 ./scripts/dev.sh
 ./scripts/typecheck.sh
 ./scripts/test.sh
 ./scripts/db-seed.sh
 ```
 
-These wrappers pin the working NVM Node binary because the current Homebrew `node` install on this machine is broken.
+`pnpm start` and `pnpm dev` both run the Next.js dev server with hot reloading in this environment. Use `pnpm start:prod` only when you specifically want the production server after a build.
+
+The shell wrappers pin the working NVM Node binary because the current Homebrew `node` install on this machine is broken.
 
 ## When network/package installs are available
 

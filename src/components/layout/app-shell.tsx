@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Archive, FolderKanban, Search, Sparkles, Sword, Upload } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -7,12 +10,14 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { href: "/", label: "Overview", icon: Sparkles },
   { href: "/collection", label: "Collection", icon: Archive },
-  { href: "/collection/import", label: "Import", icon: Upload },
+  { href: "/import", label: "Import", icon: Upload },
   { href: "/decks", label: "Decks", icon: Sword },
   { href: "/search", label: "Search", icon: Search }
 ] as const;
 
-export function AppShell({ children, pathname }: { children: React.ReactNode; pathname: string }) {
+export function AppShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
   return (
     <div className="min-h-screen bg-ink-wash">
       <div className="mx-auto grid min-h-screen max-w-[1600px] grid-cols-1 gap-6 px-4 py-5 lg:grid-cols-[260px_1fr] lg:px-6">
@@ -45,7 +50,7 @@ export function AppShell({ children, pathname }: { children: React.ReactNode; pa
                   href={item.href}
                   className={cn(
                     "flex items-center gap-3 rounded-2xl px-4 py-3 text-sm transition-colors",
-                    active ? "bg-amber-500/15 text-amber-100" : "text-slate-300 hover:bg-white/5 hover:text-white"
+                    active ? "bg-amber-300 text-slate-950" : "text-slate-300 hover:bg-white/5 hover:text-white"
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -63,4 +68,3 @@ export function AppShell({ children, pathname }: { children: React.ReactNode; pa
     </div>
   );
 }
-
