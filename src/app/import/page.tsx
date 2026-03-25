@@ -1,17 +1,20 @@
 import Link from "next/link";
 
 import {
+  assignPrintQuantityAction,
   commitImportAction,
   previewImportAction,
   resolveAmbiguousRowsBySetAction,
   resolveImportRowAction,
   searchAllFailedRowsAction,
-  searchImportRowCandidatesAction
+  switchImportRowPrintAction
 } from "@/app/import/actions";
+import { CardPreview } from "@/components/import/card-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PendingButton } from "@/components/ui/pending-button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { getImportJobDetail, getRecentImportJobs } from "@/lib/collection/import";
@@ -99,7 +102,7 @@ export default async function CollectionImportPage({
                 <Input accept=".csv,text/csv" name="file" type="file" />
                 <p className="text-xs text-muted-foreground">Optional for CSV imports. If you upload a file, it will be used instead of pasted CSV text.</p>
               </label>
-              <Button type="submit">Preview import rows</Button>
+              <PendingButton pendingText="Searching Scryfall…" type="submit">Preview import rows</PendingButton>
             </form>
           </CardContent>
         </Card>
@@ -114,7 +117,7 @@ export default async function CollectionImportPage({
               recentJobs.map((job) => (
                 <Link
                   key={job.id}
-                  className="block rounded-2xl border border-border/70 bg-white p-4 transition-colors hover:bg-accent/20"
+                  className="block rounded-2xl border border-border/70 bg-card p-4 transition-colors hover:bg-accent/20"
                   href={`/import?job=${job.id}`}
                 >
                   <div className="flex items-start justify-between gap-4">
@@ -166,10 +169,14 @@ export default async function CollectionImportPage({
                 <Badge variant={activeJob.job.status === "completed" ? "success" : "outline"}>{activeJob.job.status}</Badge>
               </div>
             </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-4">
-              <div className="rounded-2xl bg-white p-4">
+            <CardContent className="grid gap-4 md:grid-cols-5">
+              <div className="rounded-2xl bg-card p-4">
                 <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Rows</p>
                 <p className="mt-3 text-3xl font-semibold">{activeJob.job.totalRows}</p>
+              </div>
+              <div className="rounded-2xl bg-card p-4">
+                <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Total cards</p>
+                <p className="mt-3 text-3xl font-semibold">{activeJob.rows.reduce((sum, r) => sum + r.quantity, 0)}</p>
               </div>
               <div className="rounded-2xl bg-emerald-50 p-4">
                 <p className="text-xs uppercase tracking-[0.3em] text-emerald-700">Matched</p>
@@ -186,33 +193,6 @@ export default async function CollectionImportPage({
             </CardContent>
           </Card>
 
-          {activeJob.job.status !== "completed" && (activeJob.job.failedRows > 0 || activeJob.job.ambiguousRows > 0) ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Bulk review tools</CardTitle>
-                <CardDescription>Use batch actions before dropping to row-by-row fixes.</CardDescription>
-              </CardHeader>
-              <CardContent className="grid gap-4 lg:grid-cols-[auto_1fr]">
-                {activeJob.job.failedRows > 0 ? (
-                  <form action={searchAllFailedRowsAction}>
-                    <input name="jobId" type="hidden" value={activeJob.job.id} />
-                    <Button type="submit" variant="outline">
-                      Search Scryfall for all failed rows
-                    </Button>
-                  </form>
-                ) : null}
-                {activeJob.job.ambiguousRows > 0 ? (
-                  <form action={resolveAmbiguousRowsBySetAction} className="flex flex-col gap-3 lg:flex-row">
-                    <input name="jobId" type="hidden" value={activeJob.job.id} />
-                    <Input name="setCode" placeholder="Bulk resolve ambiguous rows to set code, e.g. CLB" />
-                    <Button type="submit" variant="outline">
-                      Resolve ambiguous rows by set
-                    </Button>
-                  </form>
-                ) : null}
-              </CardContent>
-            </Card>
-          ) : null}
 
           {activeJob.job.status !== "completed" && activeJob.job.matchedRows > 0 ? (
             <Card>
@@ -264,108 +244,189 @@ export default async function CollectionImportPage({
             </Card>
           ) : null}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Rows</CardTitle>
-              <CardDescription>
-                Resolve matched rows directly, search failed rows against Scryfall, or select among ambiguous cached candidates.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Input</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Resolution</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {activeJob.rows.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <div className="space-y-1">
-                          <p className="font-medium">{row.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {row.original}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {[row.setCode, row.collectorNumber, row.finish].filter(Boolean).join(" · ") || "No print hints provided"}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            row.status === "matched" ? "success" : row.status === "ambiguous" ? "warning" : "outline"
-                          }
-                        >
-                          {row.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="space-y-2">
-                          {row.resolvedCard ? (
-                            <div className="rounded-2xl border border-border/70 bg-white p-3">
-                              <p className="font-medium">{row.resolvedCard.name}</p>
-                              <p className="text-sm text-muted-foreground">
-                                {row.resolvedCard.setCode} #{row.resolvedCard.collectorNumber}
-                              </p>
-                            </div>
-                          ) : row.errorMessage ? (
-                            <p className="text-sm text-rose-700">{row.errorMessage}</p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">No resolved print yet.</p>
-                          )}
+          {(() => {
+            const failedRows = activeJob.rows.filter((r) => r.status === "failed" || r.status === "ambiguous");
+            const matchedRows = activeJob.rows.filter((r) => r.status === "matched");
 
-                          {row.candidatePrints.length > 0 ? (
-                            <form action={resolveImportRowAction} className="flex flex-col gap-3 md:flex-row">
-                              <input name="jobId" type="hidden" value={activeJob.job.id} />
-                              <input name="rowId" type="hidden" value={row.id} />
-                              <select className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm" name="printId">
-                                {row.candidatePrints.map((candidate) => (
-                                  <option key={candidate.id} value={candidate.id}>
-                                    {candidate.name} · {candidate.setCode} #{candidate.collectorNumber}
-                                  </option>
-                                ))}
-                              </select>
-                              <Button type="submit" variant="outline">
-                                Use selected print
-                              </Button>
-                            </form>
-                          ) : null}
+            const renderRow = (row: (typeof activeJob.rows)[number]) => (
+              <TableRow key={row.id}>
+                <TableCell>
+                  <div className="space-y-1">
+                    <p className="font-medium">{row.name}</p>
+                    <p className="text-sm text-muted-foreground">{row.original}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {[row.setCode, row.collectorNumber, row.finish].filter(Boolean).join(" · ") || "No print hints"}
+                    </p>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={row.status === "matched" ? "success" : row.status === "ambiguous" ? "warning" : "outline"}>
+                    {row.status}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div className="space-y-2">
+                    {row.resolvedCard ? (
+                      <div className="relative flex items-center gap-3 rounded-2xl border border-border/70 bg-card p-3">
+                        <CardPreview
+                          imageNormal={row.resolvedCard.imageNormal}
+                          imageSmall={row.resolvedCard.imageSmall}
+                          name={row.resolvedCard.name}
+                        />
+                        <div>
+                          <p className="font-medium">{row.resolvedCard.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {row.resolvedCard.setCode} #{row.resolvedCard.collectorNumber}
+                          </p>
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-2">
-                          {(row.status === "failed" || row.status === "ambiguous") && row.candidatePrints.length === 0 ? (
-                            <form action={searchImportRowCandidatesAction}>
-                              <input name="jobId" type="hidden" value={activeJob.job.id} />
-                              <input name="rowId" type="hidden" value={row.id} />
-                              <Button type="submit" variant="outline">
-                                Search Scryfall
-                              </Button>
-                            </form>
-                          ) : null}
-                          {row.status === "matched" && row.resolvedPrintId ? (
-                            <form action={resolveImportRowAction}>
-                              <input name="jobId" type="hidden" value={activeJob.job.id} />
-                              <input name="rowId" type="hidden" value={row.id} />
-                              <input name="printId" type="hidden" value={row.resolvedPrintId} />
-                              <Button type="submit" variant="outline">
-                                Confirm match
-                              </Button>
-                            </form>
-                          ) : null}
+                      </div>
+                    ) : row.errorMessage ? (
+                      <p className="text-sm text-rose-700">{row.errorMessage}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No resolved print yet.</p>
+                    )}
+
+                    {row.status !== "matched" && row.candidatePrints.length > 0 ? (
+                      row.quantity > 1 ? (
+                        <form action={assignPrintQuantityAction} className="space-y-2">
+                          <input name="jobId" type="hidden" value={activeJob.job.id} />
+                          <input name="rowId" type="hidden" value={row.id} />
+                          <p className="text-xs text-muted-foreground">{row.quantity} copies to assign</p>
+                          <div className="flex flex-col gap-2 md:flex-row">
+                            <select className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm" name="printId">
+                              {row.candidatePrints.map((candidate) => (
+                                <option key={candidate.id} value={candidate.id}>
+                                  {candidate.setCode} #{candidate.collectorNumber}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              className="flex h-10 w-20 shrink-0 rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                              defaultValue={1}
+                              max={row.quantity}
+                              min={1}
+                              name="quantity"
+                              type="number"
+                            />
+                            <Button type="submit" variant="outline">Assign</Button>
+                          </div>
+                        </form>
+                      ) : (
+                        <form action={resolveImportRowAction} className="flex flex-col gap-3 md:flex-row">
+                          <input name="jobId" type="hidden" value={activeJob.job.id} />
+                          <input name="rowId" type="hidden" value={row.id} />
+                          <select className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm" name="printId">
+                            {row.candidatePrints.map((candidate) => (
+                              <option key={candidate.id} value={candidate.id}>
+                                {candidate.name} · {candidate.setCode} #{candidate.collectorNumber}
+                              </option>
+                            ))}
+                          </select>
+                          <Button type="submit" variant="outline">Use selected print</Button>
+                        </form>
+                      )
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-2">
+                    {(row.status === "failed" || row.status === "ambiguous") && row.candidatePrints.length === 0 ? (
+                      <form action={switchImportRowPrintAction}>
+                        <input name="jobId" type="hidden" value={activeJob.job.id} />
+                        <input name="rowId" type="hidden" value={row.id} />
+                        <PendingButton pendingText="Searching…" size="sm" type="submit" variant="outline">
+                          Search by name
+                        </PendingButton>
+                      </form>
+                    ) : null}
+                    {row.status === "matched" && row.resolvedPrintId ? (
+                      <>
+                        <form action={resolveImportRowAction}>
+                          <input name="jobId" type="hidden" value={activeJob.job.id} />
+                          <input name="rowId" type="hidden" value={row.id} />
+                          <input name="printId" type="hidden" value={row.resolvedPrintId} />
+                          <PendingButton pendingText="Confirming…" type="submit" variant="outline">
+                            Confirm match
+                          </PendingButton>
+                        </form>
+                        <form action={switchImportRowPrintAction}>
+                          <input name="jobId" type="hidden" value={activeJob.job.id} />
+                          <input name="rowId" type="hidden" value={row.id} />
+                          <PendingButton pendingText="Searching…" type="submit" variant="ghost">
+                            Change print
+                          </PendingButton>
+                        </form>
+                      </>
+                    ) : null}
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+
+            return (
+              <>
+                {failedRows.length > 0 ? (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div>
+                          <CardTitle className="text-rose-700">Needs review ({failedRows.length})</CardTitle>
+                          <CardDescription>
+                            Select a print from the candidates, or search Scryfall by name to find alternatives.
+                          </CardDescription>
                         </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                        {activeJob.job.status !== "completed" ? (
+                          <form action={searchAllFailedRowsAction}>
+                            <input name="jobId" type="hidden" value={activeJob.job.id} />
+                            <PendingButton pendingText="Searching…" type="submit" variant="outline">
+                              Search all by name
+                            </PendingButton>
+                          </form>
+                        ) : null}
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Input</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Resolution</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>{failedRows.map(renderRow)}</TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ) : null}
+
+                {matchedRows.length > 0 ? (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Matched ({matchedRows.length})</CardTitle>
+                      <CardDescription>
+                        Confirm each match or change the print before committing.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Input</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Resolution</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>{matchedRows.map(renderRow)}</TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </>
+            );
+          })()}
         </section>
       ) : null}
     </div>

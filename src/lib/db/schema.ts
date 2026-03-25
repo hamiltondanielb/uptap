@@ -63,6 +63,7 @@ export const decks = sqliteTable(
     name: text("name").notNull(),
     format: text("format").notNull(),
     description: text("description"),
+    notes: text("notes"),
     commanderPrintId: text("commander_print_id").references(() => cardPrintsCache.id),
     isArchived: integer("is_archived", { mode: "boolean" }).notNull().default(false),
     createdAt: text("created_at").notNull().default("CURRENT_TIMESTAMP"),

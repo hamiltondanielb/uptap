@@ -72,7 +72,7 @@ export async function searchCardPrints(query: string): Promise<{ results: Scryfa
   }
 
   try {
-    const response = await fetch(`https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}`, {
+    const response = await fetch(`https://api.scryfall.com/cards/search?unique=prints&q=${encodeURIComponent(query)}`, {
       cache: "no-store"
     });
 
@@ -83,7 +83,7 @@ export async function searchCardPrints(query: string): Promise<{ results: Scryfa
     const parsed = searchResponseSchema.parse(await response.json());
 
     return {
-      results: parsed.data.slice(0, 12).map((item) => ({
+      results: parsed.data.map((item) => ({
         id: item.id,
         oracleId: item.oracle_id,
         name: item.name,

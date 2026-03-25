@@ -2,22 +2,27 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { deleteCollectionPrintAction, updateCollectionBucketAction } from "@/app/collection/actions";
+import { addPrintToDeckAction, deleteCollectionPrintAction, updateCollectionBucketAction } from "@/app/collection/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Input } from "@/components/ui/input";
+import { ManaCost } from "@/components/ui/mana-cost";
 import { collectionConditions, collectionFinishes, getCollectionPrintDetail } from "@/lib/collection/service";
+import { deckSections, getDeckSummaries } from "@/lib/decks/service";
 
 export default async function CollectionPrintPage({
   params,
   searchParams
 }: {
   params: { printId: string };
-  searchParams?: { updated?: string; error?: string };
+  searchParams?: { updated?: string; error?: string; added?: string };
 }) {
-  const detail = await getCollectionPrintDetail(params.printId);
+  const [detail, decks] = await Promise.all([
+    getCollectionPrintDetail(params.printId),
+    getDeckSummaries()
+  ]);
 
   if (!detail) {
     notFound();
@@ -26,14 +31,20 @@ export default async function CollectionPrintPage({
   return (
     <div className="space-y-6">
       {searchParams?.updated === "1" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50">
-          <CardContent className="p-4 text-sm text-emerald-900">Collection bucket updated.</CardContent>
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Collection bucket updated.</CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.added === "1" ? (
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card added to deck.</CardContent>
         </Card>
       ) : null}
 
       {searchParams?.error ? (
-        <Card className="border-amber-300/70 bg-amber-50">
-          <CardContent className="p-4 text-sm text-amber-900">{decodeURIComponent(searchParams.error)}</CardContent>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-4 text-sm text-amber-700 dark:text-amber-400">{decodeURIComponent(searchParams.error)}</CardContent>
         </Card>
       ) : null}
 
@@ -73,15 +84,21 @@ export default async function CollectionPrintPage({
                   <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Type line</p>
                   <p className="mt-3 text-lg font-semibold">{detail.print.typeLine ?? "Unknown type"}</p>
                 </div>
-                <div className="rounded-2xl bg-white p-4">
+                <div className="rounded-2xl bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Mana cost</p>
-                  <p className="mt-3 text-2xl font-semibold">{detail.print.manaCost ?? "None"}</p>
+                  <div className="mt-3">
+                    {detail.print.manaCost ? (
+                      <ManaCost cost={detail.print.manaCost} size={22} />
+                    ) : (
+                      <span className="text-xl font-semibold text-muted-foreground">None</span>
+                    )}
+                  </div>
                 </div>
-                <div className="rounded-2xl bg-white p-4">
+                <div className="rounded-2xl bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Owned buckets</p>
                   <p className="mt-3 text-2xl font-semibold">{detail.summary.bucketCount}</p>
                 </div>
-                <div className="rounded-2xl bg-white p-4">
+                <div className="rounded-2xl bg-card p-4">
                   <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Total copies</p>
                   <p className="mt-3 text-2xl font-semibold">
                     {detail.summary.totalCopies} total · {detail.summary.availableCopies} free
@@ -98,7 +115,7 @@ export default async function CollectionPrintPage({
               <CardContent className="space-y-3">
                 {detail.usedInDecks.length > 0 ? (
                   detail.usedInDecks.map((deck) => (
-                    <div key={`${deck.deckId}-${deck.section}`} className="rounded-2xl border border-border/70 bg-white p-4">
+                    <div key={`${deck.deckId}-${deck.section}`} className="rounded-2xl border border-border/70 bg-card p-4">
                       <div className="flex items-center justify-between gap-4">
                         <div className="space-y-1">
                           <Link className="font-medium text-primary hover:underline" href={`/decks/${deck.deckId}`}>
@@ -121,6 +138,80 @@ export default async function CollectionPrintPage({
 
       <Card>
         <CardHeader>
+          <CardTitle>Add to deck</CardTitle>
+          <CardDescription>Add this print directly to a deck in your collection.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {decks.length > 0 ? (
+            <div className="space-y-3">
+              <form action={addPrintToDeckAction} className="grid gap-4 sm:grid-cols-[1fr_160px_100px_auto] sm:items-end">
+                <input name="printId" type="hidden" value={detail.print.printId} />
+                <label className="space-y-2 text-sm">
+                  <span className="font-medium">Deck</span>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                    name="deckId"
+                  >
+                    {decks.map((deck) => (
+                      <option key={deck.id} value={deck.id}>
+                        {deck.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="font-medium">Section</span>
+                  <select
+                    className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                    defaultValue="mainboard"
+                    name="section"
+                  >
+                    {deckSections.map((section) => (
+                      <option key={section} value={section}>
+                        {section.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span className="font-medium">Qty</span>
+                  <Input
+                    defaultValue="1"
+                    min="1"
+                    max={String(detail.summary.availableCopies)}
+                    name="quantity"
+                    type="number"
+                    disabled={detail.summary.availableCopies === 0}
+                  />
+                </label>
+                <Button type="submit" disabled={detail.summary.availableCopies === 0}>
+                  Add to deck
+                </Button>
+              </form>
+              {detail.summary.availableCopies === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  All {detail.summary.totalCopies} {detail.summary.totalCopies === 1 ? "copy" : "copies"} of this print are already assigned to decks.
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {detail.summary.availableCopies} of {detail.summary.totalCopies} {detail.summary.totalCopies === 1 ? "copy" : "copies"} available to assign.
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No decks yet.{" "}
+              <Link className="text-primary hover:underline" href="/decks/new">
+                Create one
+              </Link>{" "}
+              to get started.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <CardTitle>Owned buckets</CardTitle>
@@ -140,7 +231,7 @@ export default async function CollectionPrintPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {detail.ownedBuckets.map((bucket) => (
-            <form key={bucket.id} action={updateCollectionBucketAction} className="rounded-2xl border border-border/70 bg-white p-4">
+            <form key={bucket.id} action={updateCollectionBucketAction} className="rounded-2xl border border-border/70 bg-card p-4">
               <input name="bucketId" type="hidden" value={bucket.id} />
               <input name="redirectTo" type="hidden" value="detail" />
               <input name="redirectPrintId" type="hidden" value={detail.print.printId} />

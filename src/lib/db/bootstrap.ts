@@ -407,6 +407,14 @@ async function seedDemoData() {
   ]);
 }
 
+function migrateAddDeckNotes() {
+  try {
+    sqlite.exec(`ALTER TABLE decks ADD COLUMN notes TEXT;`);
+  } catch {
+    // column already exists, ignore
+  }
+}
+
 export async function initializeAppData() {
   if (globalThis.__untapBootstrapped) {
     return;
@@ -415,6 +423,7 @@ export async function initializeAppData() {
   if (!globalThis.__untapBootstrapPromise) {
     globalThis.__untapBootstrapPromise = (async () => {
       createTables();
+      migrateAddDeckNotes();
       await seedDemoData();
       globalThis.__untapBootstrapped = true;
     })();

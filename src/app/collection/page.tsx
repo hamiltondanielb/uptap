@@ -1,14 +1,17 @@
 import { CollectionFilters } from "@/components/collection/collection-filters";
 import { CollectionInventoryTable } from "@/components/collection/collection-inventory-table";
+import { CollectionPagination } from "@/components/collection/collection-pagination";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildCollectionFilterSearchParams, normalizeCollectionSnapshotFilters } from "@/lib/collection/filters";
 import { getCollectionSnapshot } from "@/lib/collection/service";
 import { getDeckSummaries } from "@/lib/decks/service";
 
+const PAGE_SIZE = 50;
+
 export default async function CollectionPage({
   searchParams
 }: {
-  searchParams?: { q?: string; updated?: string; deleted?: string; error?: string; deckFilterMode?: string; deckId?: string };
+  searchParams?: { q?: string; updated?: string; deleted?: string; error?: string; deckFilterMode?: string; deckId?: string; page?: string };
 }) {
   const filters = normalizeCollectionSnapshotFilters({
     query: searchParams?.q,
@@ -18,6 +21,11 @@ export default async function CollectionPage({
   const [snapshot, decks] = await Promise.all([getCollectionSnapshot(filters), getDeckSummaries()]);
   const filterSearchParams = buildCollectionFilterSearchParams(filters);
   const exportHref = `/collection/export${filterSearchParams.size > 0 ? `?${filterSearchParams.toString()}` : ""}`;
+
+  const totalItems = snapshot.items.length;
+  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
+  const page = Math.min(Math.max(1, parseInt(searchParams?.page ?? "1", 10)), totalPages);
+  const pagedItems = snapshot.items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="space-y-6">
@@ -94,8 +102,16 @@ export default async function CollectionPage({
           <CollectionInventoryTable
             deckFilterMode={filters.deckFilterMode}
             deckId={filters.deckId}
-            items={snapshot.items}
+            items={pagedItems}
+            page={page}
             query={filters.query}
+          />
+          <CollectionPagination
+            filterParams={filterSearchParams}
+            page={page}
+            pageSize={PAGE_SIZE}
+            totalItems={totalItems}
+            totalPages={totalPages}
           />
         </CardContent>
       </Card>

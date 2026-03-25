@@ -21,6 +21,24 @@
   --radius: 1rem;
 }
 
+.dark {
+  --background: 220 20% 10%;
+  --foreground: 36 54% 96%;
+  --card: 220 20% 14%;
+  --card-foreground: 36 54% 96%;
+  --primary: 23 69% 52%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 202 25% 18%;
+  --secondary-foreground: 36 54% 96%;
+  --muted: 220 15% 20%;
+  --muted-foreground: 36 20% 65%;
+  --accent: 35 71% 25%;
+  --accent-foreground: 36 54% 96%;
+  --border: 220 15% 22%;
+  --input: 220 15% 22%;
+  --ring: 23 69% 52%;
+}
+
 * {
   border-color: hsl(var(--border));
 }
@@ -37,6 +55,13 @@ body {
     hsl(var(--background));
   color: hsl(var(--foreground));
   font-family: "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top left, rgba(251, 133, 0, 0.06), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(33, 158, 188, 0.04), transparent 28%),
+    hsl(var(--background));
 }
 
 a {

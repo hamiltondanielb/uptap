@@ -96,7 +96,7 @@ export default async function NewDeckPage({
             </form>
 
             {selectedCommanderName ? (
-              <div className="rounded-2xl border border-border/70 bg-white p-4">
+              <div className="rounded-2xl border border-border/70 bg-card p-4">
                 <Badge variant="success">Selected commander</Badge>
                 <p className="mt-3 font-medium">{selectedCommanderName}</p>
                 <p className="text-sm text-muted-foreground">
@@ -112,7 +112,7 @@ export default async function NewDeckPage({
                   <p className="text-sm text-muted-foreground">Already available locally.</p>
                 </div>
                 {cachedCommanderResults.map((result) => (
-                  <div key={result.id} className="rounded-2xl border border-border/70 bg-white p-4">
+                  <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
                     <p className="font-medium">{result.name}</p>
                     <p className="text-sm text-muted-foreground">
                       {result.setName} · {result.setCode} #{result.collectorNumber}
@@ -137,7 +137,7 @@ export default async function NewDeckPage({
                   <p className="text-sm text-muted-foreground">Selecting one will cache it locally first.</p>
                 </div>
                 {liveCommanderSearch.results.map((result) => (
-                  <div key={result.id} className="rounded-2xl border border-border/70 bg-white p-4">
+                  <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
                     <p className="font-medium">{result.name}</p>
                     <p className="text-sm text-muted-foreground">
                       {result.setName} · {result.set} #{result.collectorNumber}

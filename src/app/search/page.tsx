@@ -34,26 +34,26 @@ export default async function SearchPage({
       </section>
 
       {searchParams?.cached === "1" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50">
-          <CardContent className="p-4 text-sm text-emerald-900">Search result cached locally.</CardContent>
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Search result cached locally.</CardContent>
         </Card>
       ) : null}
 
       {searchParams?.addedCollection === "1" ? (
-        <Card className="border-emerald-300/70 bg-emerald-50">
-          <CardContent className="p-4 text-sm text-emerald-900">Card added to collection.</CardContent>
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card added to collection.</CardContent>
         </Card>
       ) : null}
 
       {searchParams?.addedDeck ? (
-        <Card className="border-emerald-300/70 bg-emerald-50">
-          <CardContent className="p-4 text-sm text-emerald-900">Card added to the selected deck.</CardContent>
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card added to the selected deck.</CardContent>
         </Card>
       ) : null}
 
       {searchParams?.error ? (
-        <Card className="border-amber-300/70 bg-amber-50">
-          <CardContent className="p-4 text-sm text-amber-900">{decodeURIComponent(searchParams.error)}</CardContent>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-4 text-sm text-amber-700 dark:text-amber-400">{decodeURIComponent(searchParams.error)}</CardContent>
         </Card>
       ) : null}
 
@@ -70,117 +70,95 @@ export default async function SearchPage({
       ) : null}
 
       {results.length > 0 ? (
-        <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {results.map((result) => (
             <Card key={result.id} className="overflow-hidden">
               <CardContent className="p-0">
-                {result.imageUrl ? (
-                  <div className="relative h-64 w-full bg-slate-950/95">
-                    <Image alt={result.name} className="object-contain" fill sizes="320px" src={result.imageUrl} />
-                  </div>
-                ) : null}
-                <div className="space-y-3 p-5">
-                  <div>
-                    <p className="font-display text-2xl">{result.name}</p>
-                    <p className="text-sm text-muted-foreground">
+                {/* Card header: thumbnail + info */}
+                <div className="flex gap-4 p-4">
+                  {result.imageUrl ? (
+                    <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-lg bg-slate-950/95">
+                      <Image alt={result.name} className="object-cover object-top" fill sizes="64px" src={result.imageUrl} />
+                    </div>
+                  ) : null}
+                  <div className="min-w-0 flex-1">
+                    <p className="font-display text-xl leading-tight">{result.name}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
                       {result.setName} · {result.set} #{result.collectorNumber}
                     </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {result.priceUsd ? <Badge variant="outline">${result.priceUsd}</Badge> : null}
-                    {result.priceUsdFoil ? <Badge variant="outline">Foil ${result.priceUsdFoil}</Badge> : null}
-                    <Badge variant="outline">{result.rarity}</Badge>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <Badge variant="outline">{result.rarity}</Badge>
+                      {result.priceUsd ? <Badge variant="outline">${result.priceUsd}</Badge> : null}
+                      {result.priceUsdFoil ? <Badge variant="outline">Foil ${result.priceUsdFoil}</Badge> : null}
+                    </div>
                   </div>
                 </div>
-                <div className="grid gap-4 border-t border-border/70 p-5">
+
+                {/* Actions */}
+                <div className="space-y-3 border-t border-border/50 p-4">
+                  {/* Add to collection */}
+                  <form action={addSearchResultToCollectionAction} className="space-y-2">
+                    <input name="query" type="hidden" value={query} />
+                    <input name="result" type="hidden" value={JSON.stringify(result)} />
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="space-y-1 text-xs">
+                        <span className="text-muted-foreground">Qty</span>
+                        <Input className="h-8 w-14 text-sm" defaultValue="1" min="1" name="quantity" type="number" />
+                      </label>
+                      <label className="space-y-1 text-xs">
+                        <span className="text-muted-foreground">Finish</span>
+                        <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="nonfoil" name="finish">
+                          {collectionFinishes.map((f) => <option key={f} value={f}>{f}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-xs">
+                        <span className="text-muted-foreground">Condition</span>
+                        <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="near_mint" name="condition">
+                          {collectionConditions.map((c) => <option key={c} value={c}>{c.replaceAll("_", " ")}</option>)}
+                        </select>
+                      </label>
+                      <label className="min-w-0 flex-1 space-y-1 text-xs">
+                        <span className="text-muted-foreground">Location</span>
+                        <Input className="h-8 text-sm" defaultValue="Search Intake" name="location" />
+                      </label>
+                    </div>
+                    <Button size="sm" type="submit" className="w-full">Add to collection</Button>
+                  </form>
+
+                  {/* Add to deck */}
+                  {decks.length > 0 ? (
+                    <form action={addSearchResultToDeckAction} className="space-y-2">
+                      <input name="query" type="hidden" value={query} />
+                      <input name="result" type="hidden" value={JSON.stringify(result)} />
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="min-w-0 flex-1 space-y-1 text-xs">
+                          <span className="text-muted-foreground">Deck</span>
+                          <select className="flex h-8 w-full rounded-md border border-input bg-background/80 px-2 py-1 text-sm" name="deckId">
+                            {decks.map((deck) => <option key={deck.id} value={deck.id}>{deck.name}</option>)}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">Section</span>
+                          <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="mainboard" name="section">
+                            {deckSections.map((s) => <option key={s} value={s}>{s.replaceAll("_", " ")}</option>)}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">Qty</span>
+                          <Input className="h-8 w-14 text-sm" defaultValue="1" min="1" name="quantity" type="number" />
+                        </label>
+                      </div>
+                      <Button size="sm" type="submit" variant="outline" className="w-full">Add to deck</Button>
+                    </form>
+                  ) : null}
+
+                  {/* Cache — secondary action */}
                   <form action={cacheSearchResultAction}>
                     <input name="query" type="hidden" value={query} />
                     <input name="result" type="hidden" value={JSON.stringify(result)} />
-                    <Button type="submit" variant="outline">
+                    <button type="submit" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
                       Cache print locally
-                    </Button>
-                  </form>
-
-                  <form action={addSearchResultToCollectionAction} className="grid gap-3">
-                    <input name="query" type="hidden" value={query} />
-                    <input name="result" type="hidden" value={JSON.stringify(result)} />
-                    <div className="grid gap-3 md:grid-cols-[90px_130px_170px]">
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Qty</span>
-                        <Input defaultValue="1" min="1" name="quantity" type="number" />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Finish</span>
-                        <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                          defaultValue="nonfoil"
-                          name="finish"
-                        >
-                          {collectionFinishes.map((finish) => (
-                            <option key={finish} value={finish}>
-                              {finish}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Condition</span>
-                        <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                          defaultValue="near_mint"
-                          name="condition"
-                        >
-                          {collectionConditions.map((condition) => (
-                            <option key={condition} value={condition}>
-                              {condition.replaceAll("_", " ")}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    </div>
-                    <label className="space-y-1 text-xs">
-                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Location</span>
-                      <Input defaultValue="Search Intake" name="location" />
-                    </label>
-                    <Button type="submit">Add to collection</Button>
-                  </form>
-
-                  <form action={addSearchResultToDeckAction} className="grid gap-3">
-                    <input name="query" type="hidden" value={query} />
-                    <input name="result" type="hidden" value={JSON.stringify(result)} />
-                    <div className="grid gap-3 md:grid-cols-[1fr_140px_100px]">
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Deck</span>
-                        <select className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm" name="deckId">
-                          {decks.map((deck) => (
-                            <option key={deck.id} value={deck.id}>
-                              {deck.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Section</span>
-                        <select
-                          className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                          defaultValue="mainboard"
-                          name="section"
-                        >
-                          {deckSections.map((section) => (
-                            <option key={section} value={section}>
-                              {section.replaceAll("_", " ")}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Qty</span>
-                        <Input defaultValue="1" min="1" name="quantity" type="number" />
-                      </label>
-                    </div>
-                    <Button disabled={decks.length === 0} type="submit" variant="outline">
-                      {decks.length > 0 ? "Add to deck" : "Create a deck first"}
-                    </Button>
+                    </button>
                   </form>
                 </div>
               </CardContent>

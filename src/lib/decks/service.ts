@@ -30,6 +30,7 @@ type ParsedDeckPasteRow = {
   name: string;
   setCode?: string;
   collectorNumber?: string;
+  section?: string;
 };
 
 export type DeckBulkPastePreview = {
@@ -53,6 +54,7 @@ export type DeckBulkPastePreview = {
       quantityInDeck: number;
     }>;
     matchSource: "deck" | "collection" | "cached";
+    section?: string;
   }>;
   unmatchedRows: Array<{
     lineNumber: number;
@@ -62,6 +64,7 @@ export type DeckBulkPastePreview = {
     setCode?: string;
     collectorNumber?: string;
     reason: string;
+    section?: string;
   }>;
   summary: {
     parsedRows: number;
@@ -108,30 +111,43 @@ function normalizeName(input: string) {
   return input.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function parseDeckPaste(raw: string): ParsedDeckPasteRow[] {
-  return raw
-    .split(/\r?\n/)
-    .map((line, index) => ({
-      original: line.trim(),
-      lineNumber: index + 1
-    }))
-    .filter((line) => line.original.length > 0)
-    .map(({ original, lineNumber }) => {
-      const parts = original.split("|").map((part) => part.trim());
-      const lead = parts[0] ?? "";
-      const match = lead.match(/^(\d+)x?\s+(.+)$/i);
-      const quantity = match ? Number.parseInt(match[1] ?? "1", 10) : 1;
-      const name = match ? match[2] ?? lead : lead;
+const SECTION_HEADER_RE = /^(commanders?|mainboard|sideboard|maybeboard|tokens?|considering):?\s*$/i;
+const SECTION_NORMALIZE: Record<string, string> = { commander: "commanders", token: "tokens" };
 
-      return {
-        lineNumber,
-        original,
-        quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
-        name,
-        setCode: parts[1] ? parts[1].toUpperCase() : undefined,
-        collectorNumber: parts[2] || undefined
-      };
+function parseDeckPaste(raw: string): ParsedDeckPasteRow[] {
+  const lines = raw.split(/\r?\n/);
+  const rows: ParsedDeckPasteRow[] = [];
+  let currentSection: string | undefined = undefined;
+
+  for (let i = 0; i < lines.length; i++) {
+    const original = (lines[i] ?? "").trim();
+    if (!original) continue;
+
+    const headerMatch = original.match(SECTION_HEADER_RE);
+    if (headerMatch) {
+      const key = (headerMatch[1] ?? "").toLowerCase();
+      currentSection = SECTION_NORMALIZE[key] ?? key;
+      continue;
+    }
+
+    const parts = original.split("|").map((part) => part.trim());
+    const lead = parts[0] ?? "";
+    const match = lead.match(/^(\d+)x?\s+(.+)$/i);
+    const quantity = match ? Number.parseInt(match[1] ?? "1", 10) : 1;
+    const name = match ? match[2] ?? lead : lead;
+
+    rows.push({
+      lineNumber: i + 1,
+      original,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1,
+      name,
+      setCode: parts[1] ? parts[1].toUpperCase() : undefined,
+      collectorNumber: parts[2] || undefined,
+      section: currentSection
     });
+  }
+
+  return rows;
 }
 
 function matchesDeckPasteRow(
@@ -205,9 +221,11 @@ export async function getDeckSummaries() {
     .select({
       deckId: deckEntries.deckId,
       printId: deckEntries.printId,
-      quantity: deckEntries.quantity
+      quantity: deckEntries.quantity,
+      colorIdentity: cardPrintsCache.colorIdentity
     })
-    .from(deckEntries);
+    .from(deckEntries)
+    .leftJoin(cardPrintsCache, eq(deckEntries.printId, cardPrintsCache.id));
   const tagRows = await db
     .select({
       deckId: deckTags.deckId,
@@ -223,11 +241,21 @@ export async function getDeckSummaries() {
       return sum + Math.max(entry.quantity - available, 0);
     }, 0);
 
+    const colorSet = new Set<string>();
+    for (const entry of deckEntriesForDeck) {
+      for (const color of parseColors(entry.colorIdentity)) {
+        colorSet.add(color);
+      }
+    }
+    const wubrg = ["W", "U", "B", "R", "G"];
+    const colorIdentity = wubrg.filter((c) => colorSet.has(c));
+
     return {
       ...deck,
       totalCards: deckEntriesForDeck.reduce((sum, entry) => sum + entry.quantity, 0),
       shortfall,
-      tags: tagRows.filter((tag) => tag.deckId === deck.id).map((tag) => tag.name)
+      tags: tagRows.filter((tag) => tag.deckId === deck.id).map((tag) => tag.name),
+      colorIdentity
     };
   });
 }
@@ -416,6 +444,7 @@ export async function searchCachedPrints(query: string, deckId?: string) {
       setName: print.setName,
       collectorNumber: print.collectorNumber,
       imageUrl: print.imageSmall,
+      imageNormal: print.imageNormal,
       typeLine: print.typeLine,
       manaCost: print.manaCost,
       colors: parseColors(print.colorIdentity),
@@ -466,7 +495,8 @@ export async function previewDeckBulkPaste(input: { deckId: string; raw: string 
         setCode: row.setCode,
         collectorNumber: row.collectorNumber,
         candidatePrints: deckMatches.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
-        matchSource: "deck"
+        matchSource: "deck",
+        section: row.section
       });
       continue;
     }
@@ -481,7 +511,8 @@ export async function previewDeckBulkPaste(input: { deckId: string; raw: string 
         setCode: row.setCode,
         collectorNumber: row.collectorNumber,
         candidatePrints: collectionMatches.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
-        matchSource: "collection"
+        matchSource: "collection",
+        section: row.section
       });
       continue;
     }
@@ -496,7 +527,8 @@ export async function previewDeckBulkPaste(input: { deckId: string; raw: string 
         setCode: row.setCode,
         collectorNumber: row.collectorNumber,
         candidatePrints: candidates.map((print) => mapPreviewCandidate(print, availability, quantityInDeck)),
-        matchSource: "cached"
+        matchSource: "cached",
+        section: row.section
       });
       continue;
     }
@@ -508,7 +540,8 @@ export async function previewDeckBulkPaste(input: { deckId: string; raw: string 
       name: row.name,
       setCode: row.setCode,
       collectorNumber: row.collectorNumber,
-      reason: "Not found in your local collection cache."
+      reason: "Not found in your local collection cache.",
+      section: row.section
     });
   }
 
@@ -559,6 +592,12 @@ export async function deleteDeck(input: { deckId: string }) {
     deckId: deck.id,
     deckName: deck.name
   };
+}
+
+export async function updateDeckNotes(input: { deckId: string; notes: string }) {
+  await initializeAppData();
+
+  await db.update(decks).set({ notes: input.notes || null }).where(eq(decks.id, input.deckId));
 }
 
 export async function updateDeckMeta(input: {
@@ -636,7 +675,7 @@ export async function addDeckEntry(input: {
 export async function commitDeckBulkPaste(input: {
   deckId: string;
   section: string;
-  matchedRows: Array<{ printId: string; quantity: number }>;
+  matchedRows: Array<{ printId: string; quantity: number; section?: string }>;
 }) {
   await initializeAppData();
 
@@ -645,11 +684,18 @@ export async function commitDeckBulkPaste(input: {
   }
 
   const normalizedRows = input.matchedRows
-    .map((row) => ({
-      printId: row.printId,
-      quantity: Number.isFinite(row.quantity) && row.quantity > 0 ? Math.floor(row.quantity) : 0
-    }))
-    .filter((row) => row.printId && row.quantity > 0);
+    .map((row) => {
+      const resolvedSection = row.section ?? input.section;
+      if (!deckSections.includes(resolvedSection as (typeof deckSections)[number])) {
+        return null;
+      }
+      return {
+        printId: row.printId,
+        quantity: Number.isFinite(row.quantity) && row.quantity > 0 ? Math.floor(row.quantity) : 0,
+        section: resolvedSection
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null && row.printId !== "" && row.quantity > 0);
 
   if (normalizedRows.length === 0) {
     throw new Error("No matched rows to add.");
@@ -665,8 +711,9 @@ export async function commitDeckBulkPaste(input: {
     throw new Error("One or more matched prints are no longer cached.");
   }
 
-  const quantitiesByPrint = normalizedRows.reduce<Record<string, number>>((acc, row) => {
-    acc[row.printId] = (acc[row.printId] ?? 0) + row.quantity;
+  const quantitiesByPrintAndSection = normalizedRows.reduce<Record<string, number>>((acc, row) => {
+    const key = `${row.printId}::${row.section}`;
+    acc[key] = (acc[key] ?? 0) + row.quantity;
     return acc;
   }, {});
 
@@ -675,8 +722,9 @@ export async function commitDeckBulkPaste(input: {
     .from(deckEntries)
     .where(eq(deckEntries.deckId, input.deckId));
 
-  for (const [printId, quantity] of Object.entries(quantitiesByPrint)) {
-    const existingEntry = existingEntries.find((entry) => entry.printId === printId && entry.section === input.section);
+  for (const [key, quantity] of Object.entries(quantitiesByPrintAndSection)) {
+    const [printId, section] = key.split("::") as [string, string];
+    const existingEntry = existingEntries.find((entry) => entry.printId === printId && entry.section === section);
 
     if (existingEntry) {
       await db
@@ -693,7 +741,7 @@ export async function commitDeckBulkPaste(input: {
       deckId: input.deckId,
       printId,
       quantity,
-      section: input.section
+      section
     });
   }
 

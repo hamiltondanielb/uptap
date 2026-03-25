@@ -4,13 +4,16 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import {
+  assignPrintQuantity,
   commitImportJob,
   previewCollectionImport,
   resolvePreviewImportRawInput,
   resolveAmbiguousRowsBySet,
   resolveImportRow,
   searchAndCacheAllFailedRows,
-  searchAndCacheImportRowCandidates
+  searchAndCacheImportRowCandidates,
+  searchAndResolveImportRowManually,
+  switchImportRowPrint
 } from "@/lib/collection/import";
 
 const importPath = "/import";
@@ -97,6 +100,54 @@ export async function searchAllFailedRowsAction(formData: FormData) {
     revalidatePath(importPath);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to search all failed rows.";
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`${importPath}?job=${jobId}`);
+}
+
+export async function assignPrintQuantityAction(formData: FormData) {
+  const jobId = String(formData.get("jobId") ?? "");
+  const rowId = String(formData.get("rowId") ?? "");
+  const printId = String(formData.get("printId") ?? "");
+  const quantity = parseInt(String(formData.get("quantity") ?? "1"), 10);
+
+  try {
+    await assignPrintQuantity({ jobId, rowId, printId, quantity });
+    revalidatePath(importPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to assign print.";
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`${importPath}?job=${jobId}`);
+}
+
+export async function searchImportRowManuallyAction(formData: FormData) {
+  const jobId = String(formData.get("jobId") ?? "");
+  const rowId = String(formData.get("rowId") ?? "");
+  const searchQuery = String(formData.get("searchQuery") ?? "");
+
+  try {
+    await searchAndResolveImportRowManually({ jobId, rowId, searchQuery });
+    revalidatePath(importPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to search for this row.";
+    redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
+  }
+
+  redirect(`${importPath}?job=${jobId}`);
+}
+
+export async function switchImportRowPrintAction(formData: FormData) {
+  const jobId = String(formData.get("jobId") ?? "");
+  const rowId = String(formData.get("rowId") ?? "");
+
+  try {
+    await switchImportRowPrint({ jobId, rowId });
+    revalidatePath(importPath);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to search for alternative prints.";
     redirect(`${importPath}?job=${jobId}&error=${encodeURIComponent(message)}`);
   }
 

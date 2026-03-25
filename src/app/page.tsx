@@ -54,15 +54,15 @@ export default async function HomePage() {
               <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Owned prints</p>
               <p className="mt-3 text-4xl font-semibold">{summary.ownedPrints}</p>
             </div>
-            <div className="rounded-2xl bg-white p-4">
+            <div className="rounded-2xl bg-card p-4">
               <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Unique cards</p>
               <p className="mt-3 text-4xl font-semibold">{summary.uniqueCards}</p>
             </div>
-            <div className="rounded-2xl bg-white p-4">
+            <div className="rounded-2xl bg-card p-4">
               <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Total copies</p>
               <p className="mt-3 text-4xl font-semibold">{summary.totalCopies}</p>
             </div>
-            <div className="rounded-2xl bg-white p-4">
+            <div className="rounded-2xl bg-card p-4">
               <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Available now</p>
               <p className="mt-3 text-4xl font-semibold">{summary.availableCopies}</p>
             </div>
@@ -104,7 +104,7 @@ export default async function HomePage() {
           </CardHeader>
           <CardContent>
             {activeDeck ? (
-              <div className="rounded-2xl border border-border/70 bg-white p-5">
+              <div className="rounded-2xl border border-border/70 bg-card p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <p className="font-display text-2xl">{activeDeck.name}</p>

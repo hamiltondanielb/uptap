@@ -3,7 +3,8 @@ import Link from "next/link";
 import { deleteDeckAction } from "@/app/decks/actions";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { ManaSymbol } from "@/components/ui/mana-symbol";
 import { getDeckSummaries } from "@/lib/decks/service";
 
 export default async function DecksPage({
@@ -26,62 +27,81 @@ export default async function DecksPage({
       </section>
 
       {searchParams?.deleted ? (
-        <Card className="border-emerald-300/70 bg-emerald-50">
-          <CardContent className="p-4 text-sm text-emerald-900">
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">
             Deleted {decodeURIComponent(searchParams.deleted)}.
           </CardContent>
         </Card>
       ) : null}
 
       {searchParams?.error ? (
-        <Card className="border-amber-300/70 bg-amber-50">
-          <CardContent className="p-4 text-sm text-amber-900">{decodeURIComponent(searchParams.error)}</CardContent>
+        <Card className="border-amber-500/30 bg-amber-500/10">
+          <CardContent className="p-4 text-sm text-amber-700 dark:text-amber-400">{decodeURIComponent(searchParams.error)}</CardContent>
         </Card>
       ) : null}
 
-      <section className="grid gap-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {decks.map((deck) => (
-          <Card key={deck.id}>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <CardDescription>{deck.format}</CardDescription>
-                  <CardTitle>{deck.name}</CardTitle>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">{deck.description}</p>
-                </div>
-                <Badge variant={deck.shortfall > 0 ? "warning" : "success"}>
-                  {deck.shortfall > 0 ? `${deck.shortfall} missing` : "In collection"}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="flex flex-wrap items-center justify-between gap-4">
-              <div className="flex flex-wrap gap-2">
-                {deck.tags.map((tag) => (
-                  <Badge key={tag} variant="outline">
-                    {tag}
+          <div key={deck.id} className="relative">
+            {/* Full-card link underneath interactive elements */}
+            <Link href={`/decks/${deck.id}`} className="absolute inset-0 rounded-xl" aria-label={`Open ${deck.name}`} />
+            <Card className="h-full transition-shadow hover:shadow-md">
+              <CardContent className="flex h-full flex-col p-5">
+                {/* Top row: format + status badge */}
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">{deck.format}</p>
+                  <Badge variant={deck.shortfall > 0 ? "warning" : "success"} className="shrink-0">
+                    {deck.shortfall > 0 ? `${deck.shortfall} missing` : "In collection"}
                   </Badge>
-                ))}
-              </div>
-              <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                <span>{deck.totalCards} tracked cards</span>
-                <Link className="font-medium text-primary" href={`/decks/${deck.id}`}>
-                  Open editor
-                </Link>
-                <form action={deleteDeckAction}>
-                  <input name="deckId" type="hidden" value={deck.id} />
-                  <input name="returnTo" type="hidden" value="list" />
-                  <ConfirmSubmitButton
-                    confirmMessage={`Delete ${deck.name}? This removes the deck and all of its entries.`}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    Delete deck
-                  </ConfirmSubmitButton>
-                </form>
-              </div>
-            </CardContent>
-          </Card>
+                </div>
+
+                {/* Deck name */}
+                <p className="mt-1.5 font-display text-xl leading-snug">{deck.name}</p>
+
+                {/* Description */}
+                {deck.description ? (
+                  <p className="mt-1.5 line-clamp-2 text-sm text-muted-foreground">{deck.description}</p>
+                ) : null}
+
+                {/* Color identity */}
+                {deck.colorIdentity.length > 0 ? (
+                  <div className="mt-3 flex items-center gap-1">
+                    {deck.colorIdentity.map((color) => (
+                      <ManaSymbol key={color} symbol={color} size={18} />
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* Tags */}
+                {deck.tags.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {deck.tags.map((tag) => (
+                      <Badge key={tag} variant="outline">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* Footer */}
+                <div className="relative mt-auto flex items-center justify-between pt-4">
+                  <span className="text-sm text-muted-foreground">{deck.totalCards} cards</span>
+                  <form action={deleteDeckAction}>
+                    <input name="deckId" type="hidden" value={deck.id} />
+                    <input name="returnTo" type="hidden" value="list" />
+                    <ConfirmSubmitButton
+                      confirmMessage={`Delete ${deck.name}? This removes the deck and all of its entries.`}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Delete
+                    </ConfirmSubmitButton>
+                  </form>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         ))}
       </section>
     </div>

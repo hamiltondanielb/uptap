@@ -7,7 +7,7 @@ export async function POST(request: Request, { params }: { params: { deckId: str
   try {
     const body = (await request.json()) as {
       section?: string;
-      matchedRows?: Array<{ printId?: string; quantity?: number }>;
+      matchedRows?: Array<{ printId?: string; quantity?: number; section?: string }>;
     };
 
     const result = await commitDeckBulkPaste({
@@ -15,7 +15,8 @@ export async function POST(request: Request, { params }: { params: { deckId: str
       section: body.section ?? "mainboard",
       matchedRows: (body.matchedRows ?? []).map((row) => ({
         printId: String(row.printId ?? ""),
-        quantity: Number(row.quantity ?? 0)
+        quantity: Number(row.quantity ?? 0),
+        section: row.section ? String(row.section) : undefined
       }))
     });
 

@@ -30,6 +30,7 @@ type DeckBulkPastePreview = {
       quantityInDeck: number;
     }>;
     matchSource: "deck" | "collection" | "cached";
+    section?: string;
   }>;
   unmatchedRows: Array<{
     lineNumber: number;
@@ -129,7 +130,8 @@ export function DeckBulkPaste({
           section,
           matchedRows: preview.matchedRows.map((row) => ({
             printId: selectedPrintIds[rowKey(row)] ?? row.selectedPrintId,
-            quantity: row.quantity
+            quantity: row.quantity,
+            section: row.section
           }))
         })
       });
@@ -184,7 +186,7 @@ export function DeckBulkPaste({
           </label>
 
           <label className="block space-y-2 text-sm">
-            <span className="font-medium">Section for matched cards</span>
+            <span className="font-medium">Default section (for untagged cards)</span>
             <select
               className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
               onChange={(event) => setSection(event.target.value)}
@@ -213,19 +215,19 @@ export function DeckBulkPaste({
           </div>
           </form>
 
-          {error ? <p className="rounded-xl border border-amber-300/70 bg-amber-50 p-3 text-sm text-amber-900">{error}</p> : null}
-          {success ? <p className="rounded-xl border border-emerald-300/70 bg-emerald-50 p-3 text-sm text-emerald-900">{success}</p> : null}
+          {error ? <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">{error}</p> : null}
+          {success ? <p className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-700 dark:text-emerald-400">{success}</p> : null}
 
           {preview ? (
-            <div className="space-y-4 rounded-2xl border border-border/70 bg-stone-50 p-4">
+            <div className="space-y-4 rounded-2xl border border-border/70 bg-muted/30 p-4">
               <div className="flex flex-wrap gap-2">
-                <Badge className="border-stone-300 bg-white text-stone-900" variant="outline">
+                <Badge variant="outline">
                   {preview.summary.parsedRows} parsed
                 </Badge>
-                <Badge className="border-emerald-300 bg-emerald-100 text-emerald-950" variant="outline">
+                <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">
                   {preview.summary.matchedRows} matched rows
                 </Badge>
-                <Badge className="border-amber-300 bg-amber-100 text-amber-950" variant="outline">
+                <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400" variant="outline">
                   {preview.summary.unmatchedRows} unmatched rows
                 </Badge>
               </div>
@@ -234,7 +236,7 @@ export function DeckBulkPaste({
                 <div className="space-y-3">
                   <p className="text-sm font-medium">Matched prints</p>
                   {preview.matchedRows.map((row) => (
-                    <div key={rowKey(row)} className="rounded-xl border border-border/70 bg-white p-3">
+                    <div key={rowKey(row)} className="rounded-xl border border-border/70 bg-card p-3">
                       {(() => {
                         const selectedCandidate =
                           row.candidatePrints.find(
@@ -255,6 +257,7 @@ export function DeckBulkPaste({
                                 <p className="text-sm text-muted-foreground">
                                   Line {row.lineNumber} · {selectedCandidate.setName} · {selectedCandidate.setCode} #
                                   {selectedCandidate.collectorNumber}
+                                  {row.section ? ` · ${prettySection(row.section)}` : ` · ${prettySection(section)}`}
                                 </p>
                               </div>
                               <Badge
@@ -262,8 +265,8 @@ export function DeckBulkPaste({
                                   row.matchSource === "deck"
                                     ? ""
                                     : row.matchSource === "collection"
-                                      ? "border-emerald-300 bg-emerald-100 text-emerald-950"
-                                      : "border-amber-300 bg-amber-100 text-amber-950"
+                                      ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                      : "border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400"
                                 }
                                 variant={row.matchSource === "deck" ? "info" : "outline"}
                               >
@@ -301,8 +304,8 @@ export function DeckBulkPaste({
                               <Badge
                                 className={
                                   selectedCandidate.available > 0
-                                    ? "border-emerald-300 bg-emerald-100 text-emerald-950"
-                                    : "border-stone-300 bg-stone-100 text-stone-950"
+                                    ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                                    : "border-border bg-muted/50 text-muted-foreground"
                                 }
                                 variant="outline"
                               >
@@ -314,7 +317,7 @@ export function DeckBulkPaste({
                                 </Badge>
                               ) : null}
                               {row.matchSource === "cached" ? (
-                                <Badge className="border-amber-300 bg-amber-100 text-amber-950" variant="outline">
+                                <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400" variant="outline">
                                   Not in collection yet
                                 </Badge>
                               ) : null}
@@ -331,11 +334,11 @@ export function DeckBulkPaste({
                 <div className="space-y-3">
                   <p className="text-sm font-medium">Not added</p>
                   {preview.unmatchedRows.map((row) => (
-                    <div key={`${row.lineNumber}-${row.original}`} className="rounded-xl border border-amber-300/70 bg-amber-50 p-3">
+                    <div key={`${row.lineNumber}-${row.original}`} className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
                       <p className="font-medium">
                         Line {row.lineNumber} · {row.original}
                       </p>
-                      <p className="text-sm text-amber-900">{row.reason}</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-400">{row.reason}</p>
                     </div>
                   ))}
                 </div>

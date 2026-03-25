@@ -69,6 +69,8 @@ type ImportJobDetail = {
           setCode: string;
           setName: string;
           collectorNumber: string;
+          imageSmall: string | null;
+          imageNormal: string | null;
         }
       | null;
     candidatePrints: Array<{
@@ -77,6 +79,7 @@ type ImportJobDetail = {
       setCode: string;
       setName: string;
       collectorNumber: string;
+      imageSmall: string | null;
     }>;
   }>;
 };
@@ -406,7 +409,33 @@ export async function previewCollectionImport(sourceTypeInput: string, rawInput:
   }
 
   const parsedRows = sourceType === "csv" ? parseCsvImport(raw) : parsePlaintextImport(raw);
-  const resolvedRows = await resolveRows(parsedRows);
+
+  // Round 1: search with all available hints (set+cn when present, name-only otherwise)
+  for (const row of parsedRows) {
+    const query = buildRowSearchQuery({ name: row.name, setCode: row.setCode ?? null, collectorNumber: row.collectorNumber ?? null });
+    const { results } = await searchCardPrints(query);
+    if (results.length > 0) {
+      await cacheScryfallPrints(results);
+    }
+  }
+
+  const firstPassRows = await resolveRows(parsedRows);
+
+  // Round 2: name-only fallback for rows that still failed despite having set/cn hints
+  // Clears the constraints so any cached print of that card becomes a candidate
+  const needsFallback = parsedRows.filter((row, i) => firstPassRows[i].status === "failed" && (row.setCode || row.collectorNumber));
+  if (needsFallback.length > 0) {
+    for (const row of needsFallback) {
+      const { results } = await searchCardPrints(`!"${row.name}"`);
+      if (results.length > 0) {
+        await cacheScryfallPrints(results);
+      }
+      row.setCode = undefined;
+      row.collectorNumber = undefined;
+    }
+  }
+
+  const resolvedRows = needsFallback.length > 0 ? await resolveRows(parsedRows) : firstPassRows;
   const summary = summarizeRows(resolvedRows);
   const jobId = randomUUID();
 
@@ -468,7 +497,9 @@ export async function getImportJobDetail(jobId: string): Promise<ImportJobDetail
         name: card.name,
         setCode: card.setCode,
         setName: card.setName,
-        collectorNumber: card.collectorNumber
+        collectorNumber: card.collectorNumber,
+        imageSmall: card.imageSmall,
+        imageNormal: card.imageNormal
       }
     ])
   );
@@ -485,7 +516,8 @@ export async function getImportJobDetail(jobId: string): Promise<ImportJobDetail
           name: print.name,
           setCode: print.setCode,
           setName: print.setName,
-          collectorNumber: print.collectorNumber
+          collectorNumber: print.collectorNumber,
+          imageSmall: print.imageSmall
         }))
     }))
   };
@@ -660,22 +692,146 @@ export async function searchAndCacheAllFailedRows(jobId: string) {
   let touched = 0;
 
   for (const row of failedRows) {
-    const query = buildRowSearchQuery(row);
-    const { results } = await searchCardPrints(query);
+    // Always search by name only — set/cn already failed during preview
+    const { results } = await searchCardPrints(`!"${row.name}"`);
     if (results.length === 0) {
       continue;
     }
 
     await cacheScryfallPrints(results);
-    await resolveRowAgainstCache(row);
+
+    // Clear set/cn constraints so any print of this card becomes a candidate
+    await db
+      .update(collectionImportRows)
+      .set({ setCode: null, collectorNumber: null })
+      .where(eq(collectionImportRows.id, row.id));
+
+    await resolveRowAgainstCache({ ...row, setCode: null, collectorNumber: null });
     touched += 1;
   }
 
   await refreshJobSummary(jobId);
 
   if (touched === 0) {
-    throw new Error("No failed rows could be improved from Scryfall results.");
+    throw new Error("No failed rows could be found by name on Scryfall.");
   }
+}
+
+export async function assignPrintQuantity(input: { jobId: string; rowId: string; printId: string; quantity: number }) {
+  await initializeAppData();
+
+  const [row] = await db
+    .select()
+    .from(collectionImportRows)
+    .where(and(eq(collectionImportRows.id, input.rowId), eq(collectionImportRows.jobId, input.jobId)));
+
+  if (!row) throw new Error("Import row not found.");
+
+  const qty = Math.max(1, Math.min(Math.floor(input.quantity), row.quantity));
+
+  const [print] = await db.select().from(cardPrintsCache).where(eq(cardPrintsCache.id, input.printId));
+  if (!print) throw new Error("Selected print not found.");
+
+  // Create a new matched row for this assignment
+  await db.insert(collectionImportRows).values({
+    id: randomUUID(),
+    jobId: input.jobId,
+    original: row.original,
+    quantity: qty,
+    name: row.name,
+    setCode: print.setCode,
+    collectorNumber: print.collectorNumber,
+    finish: row.finish,
+    status: "matched",
+    resolvedPrintId: print.id,
+    errorMessage: null
+  });
+
+  const remaining = row.quantity - qty;
+
+  if (remaining <= 0) {
+    // All copies assigned — remove original row
+    await db.delete(collectionImportRows).where(eq(collectionImportRows.id, input.rowId));
+  } else {
+    // Keep original row with reduced quantity for remaining copies
+    await db
+      .update(collectionImportRows)
+      .set({ quantity: remaining, errorMessage: `${remaining} cop${remaining === 1 ? "y" : "ies"} still need a print assigned.` })
+      .where(eq(collectionImportRows.id, input.rowId));
+  }
+
+  await refreshJobSummary(input.jobId);
+}
+
+export async function searchAndResolveImportRowManually(input: { jobId: string; rowId: string; searchQuery: string }) {
+  await initializeAppData();
+
+  const query = input.searchQuery.trim();
+  if (!query) {
+    throw new Error("Search query is required.");
+  }
+
+  const [row] = await db
+    .select()
+    .from(collectionImportRows)
+    .where(and(eq(collectionImportRows.id, input.rowId), eq(collectionImportRows.jobId, input.jobId)));
+
+  if (!row) {
+    throw new Error("Import row not found.");
+  }
+
+  const { results, error } = await searchCardPrints(query);
+  if (error) {
+    throw new Error(error);
+  }
+
+  if (results.length === 0) {
+    throw new Error("Scryfall returned no results for that query.");
+  }
+
+  await cacheScryfallPrints(results);
+
+  // Clear set/cn so any cached print matching the row name can be selected
+  await db
+    .update(collectionImportRows)
+    .set({ setCode: null, collectorNumber: null })
+    .where(eq(collectionImportRows.id, input.rowId));
+
+  await resolveRowAgainstCache({ ...row, setCode: null, collectorNumber: null });
+  await refreshJobSummary(input.jobId);
+}
+
+export async function switchImportRowPrint(input: { jobId: string; rowId: string }) {
+  await initializeAppData();
+
+  const [row] = await db
+    .select()
+    .from(collectionImportRows)
+    .where(and(eq(collectionImportRows.id, input.rowId), eq(collectionImportRows.jobId, input.jobId)));
+
+  if (!row) {
+    throw new Error("Import row not found.");
+  }
+
+  // Name-only search so all prints of this card become candidates
+  const { results } = await searchCardPrints(`!"${row.name}"`);
+  if (results.length > 0) {
+    await cacheScryfallPrints(results);
+  }
+
+  // Clear set/cn so matchesImportRow returns ALL name-matching prints as candidates
+  await db
+    .update(collectionImportRows)
+    .set({
+      setCode: null,
+      collectorNumber: null,
+      status: "ambiguous",
+      resolvedPrintId: null,
+      errorMessage: "Select the exact print below."
+    })
+    .where(eq(collectionImportRows.id, input.rowId));
+
+  await refreshJobSummary(input.jobId);
 }
 
 export async function resolveAmbiguousRowsBySet(input: { jobId: string; setCode: string }) {

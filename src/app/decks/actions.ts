@@ -12,13 +12,27 @@ import {
   setDeckCommander,
   setDeckEntryQuantity,
   updateDeckEntrySection,
-  updateDeckMeta
+  updateDeckMeta,
+  updateDeckNotes
 } from "@/lib/decks/service";
 import { cacheScryfallPrints, type ScryfallSearchResult } from "@/lib/scryfall/client";
 
 function redirectWithError(path: string, error: unknown) {
   const message = error instanceof Error ? error.message : "Deck update failed.";
   redirect(`${path}${path.includes("?") ? "&" : "?"}error=${encodeURIComponent(message)}`);
+}
+
+export async function updateDeckNotesAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const notes = String(formData.get("notes") ?? "");
+  if (!deckId) redirect("/decks");
+  try {
+    await updateDeckNotes({ deckId, notes });
+  } catch (error) {
+    redirectWithError(`/decks/${deckId}?tab=notes`, error);
+  }
+  revalidatePath(`/decks/${deckId}`);
+  redirect(`/decks/${deckId}?tab=notes&saved=1`);
 }
 
 export async function createDeckAction(formData: FormData) {

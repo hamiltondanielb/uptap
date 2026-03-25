@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { buildCollectionFilterSearchParams } from "@/lib/collection/filters";
 import { deleteCollectionBuckets, deleteCollectionPrint, updateCollectionBucket } from "@/lib/collection/service";
+import { addDeckEntry } from "@/lib/decks/service";
 
 function buildCollectionRedirectUrl(
   filters: {
@@ -103,6 +104,30 @@ export async function deleteCollectionPrintAction(formData: FormData) {
   redirect(buildCollectionRedirectUrl({}, { deleted: "1" }));
 }
 
+export async function addPrintToDeckAction(formData: FormData) {
+  const printId = String(formData.get("printId") ?? "");
+  const deckId = String(formData.get("deckId") ?? "");
+  const section = String(formData.get("section") ?? "mainboard");
+  const quantity = Number.parseInt(String(formData.get("quantity") ?? "1"), 10);
+
+  try {
+    await addDeckEntry({
+      deckId,
+      printId,
+      section,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+    });
+    revalidatePath("/decks");
+    revalidatePath(`/decks/${deckId}`);
+    revalidatePath(`/collection/card/${printId}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unable to add card to deck.";
+    redirect(buildCollectionDetailRedirectUrl(printId, { error: message }));
+  }
+
+  redirect(buildCollectionDetailRedirectUrl(printId, { added: "1" }));
+}
+
 export async function deleteCollectionBucketsAction(formData: FormData) {
   const bucketIds = formData
     .getAll("bucketIds")
@@ -111,6 +136,8 @@ export async function deleteCollectionBucketsAction(formData: FormData) {
   const query = String(formData.get("query") ?? "");
   const deckFilterMode = String(formData.get("deckFilterMode") ?? "");
   const deckId = String(formData.get("deckId") ?? "");
+  const page = String(formData.get("page") ?? "1");
+  const pageExtra: Record<string, string> = page !== "1" ? { page } : {};
 
   try {
     const result = await deleteCollectionBuckets(bucketIds);
@@ -123,8 +150,8 @@ export async function deleteCollectionBucketsAction(formData: FormData) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to delete selected collection rows.";
-    redirect(buildCollectionRedirectUrl({ query, deckFilterMode, deckId }, { error: message }));
+    redirect(buildCollectionRedirectUrl({ query, deckFilterMode, deckId }, { error: message, ...pageExtra }));
   }
 
-  redirect(buildCollectionRedirectUrl({ query, deckFilterMode, deckId }, { deleted: "1" }));
+  redirect(buildCollectionRedirectUrl({ query, deckFilterMode, deckId }, { deleted: "1", ...pageExtra }));
 }
