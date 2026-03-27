@@ -20,6 +20,8 @@ export const cardPrintsCache = sqliteTable(
     colors: text("colors"),
     colorIdentity: text("color_identity"),
     cmc: real("cmc"),
+    priceUsd: real("price_usd"),
+    priceUsdFoil: real("price_usd_foil"),
     layout: text("layout").notNull().default("normal"),
     scryfallUpdatedAt: text("scryfall_updated_at"),
     cachedAt: text("cached_at").notNull().default("CURRENT_TIMESTAMP")

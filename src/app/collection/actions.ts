@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { buildCollectionFilterSearchParams } from "@/lib/collection/filters";
 import { deleteCollectionBuckets, deleteCollectionPrint, updateCollectionBucket } from "@/lib/collection/service";
 import { addDeckEntry } from "@/lib/decks/service";
+import { refreshCachedPrices, refreshSinglePrintPrice } from "@/lib/scryfall/client";
 
 function buildCollectionRedirectUrl(
   filters: {
@@ -126,6 +127,22 @@ export async function addPrintToDeckAction(formData: FormData) {
   }
 
   redirect(buildCollectionDetailRedirectUrl(printId, { added: "1" }));
+}
+
+export async function refreshPrintPricesAction(formData: FormData) {
+  const printId = String(formData.get("printId") ?? "");
+  await refreshSinglePrintPrice(printId);
+  revalidatePath("/collection");
+  revalidatePath("/");
+  revalidatePath(`/collection/card/${printId}`);
+  redirect(buildCollectionDetailRedirectUrl(printId, { pricesRefreshed: "1" }));
+}
+
+export async function refreshCollectionPricesAction() {
+  const result = await refreshCachedPrices();
+  revalidatePath("/collection");
+  revalidatePath("/");
+  redirect(`/collection?pricesRefreshed=${result.updated}`);
 }
 
 export async function deleteCollectionBucketsAction(formData: FormData) {

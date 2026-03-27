@@ -66,6 +66,14 @@ export default async function HomePage() {
               <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Available now</p>
               <p className="mt-3 text-4xl font-semibold">{summary.availableCopies}</p>
             </div>
+            <div className="rounded-2xl bg-card p-4 sm:col-span-2">
+              <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Est. market value</p>
+              <p className="mt-3 text-4xl font-semibold">
+                {summary.totalMarketValue != null
+                  ? `$${summary.totalMarketValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                  : "—"}
+              </p>
+            </div>
           </CardContent>
         </Card>
       </section>

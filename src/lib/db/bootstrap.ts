@@ -407,6 +407,11 @@ async function seedDemoData() {
   ]);
 }
 
+function migrateAddPriceColumns() {
+  try { sqlite.exec(`ALTER TABLE card_prints_cache ADD COLUMN price_usd REAL;`); } catch {}
+  try { sqlite.exec(`ALTER TABLE card_prints_cache ADD COLUMN price_usd_foil REAL;`); } catch {}
+}
+
 function migrateAddDeckNotes() {
   try {
     sqlite.exec(`ALTER TABLE decks ADD COLUMN notes TEXT;`);
@@ -423,6 +428,7 @@ export async function initializeAppData() {
   if (!globalThis.__untapBootstrapPromise) {
     globalThis.__untapBootstrapPromise = (async () => {
       createTables();
+      migrateAddPriceColumns();
       migrateAddDeckNotes();
       await seedDemoData();
       globalThis.__untapBootstrapped = true;

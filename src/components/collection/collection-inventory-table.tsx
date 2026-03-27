@@ -24,6 +24,7 @@ type CollectionInventoryItem = {
   location: string | null;
   imageUrl: string | null;
   colors: string | string[] | null;
+  itemValue: number | null;
 };
 
 function parseColors(raw: string | string[] | null | undefined): string[] {
@@ -86,6 +87,7 @@ export function CollectionInventoryTable({
             <TableHead>Card</TableHead>
             <TableHead>Total</TableHead>
             <TableHead>Free</TableHead>
+            <TableHead>Value</TableHead>
             <TableHead>Location</TableHead>
           </TableRow>
         </TableHeader>
@@ -155,6 +157,13 @@ export function CollectionInventoryTable({
                 </TableCell>
                 <TableCell>
                   <p className="text-sm font-medium">{item.quantityAvailable}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm tabular-nums text-muted-foreground">
+                    {item.itemValue != null
+                      ? `$${item.itemValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : "—"}
+                  </p>
                 </TableCell>
                 <TableCell>
                   <p className="text-sm text-muted-foreground">{item.location ?? "—"}</p>

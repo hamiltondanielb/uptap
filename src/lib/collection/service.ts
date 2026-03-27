@@ -26,7 +26,13 @@ export type CollectionListItem = {
   imageUrl: string | null;
   colors: string[];
   deckNames: string[];
+  itemValue: number | null;
 };
+
+function marketValue(priceUsd: number | null, priceUsdFoil: number | null, finish: string, qty: number): number | null {
+  const unit = finish === "foil" ? (priceUsdFoil ?? priceUsd) : priceUsd;
+  return unit != null ? Math.round(unit * qty * 100) / 100 : null;
+}
 
 function parseArray(value: string | null) {
   if (!value) {
@@ -59,7 +65,9 @@ export async function getCollectionSnapshot(filters: CollectionSnapshotFilters =
       quantityAvailable: collectionItems.quantityAvailable,
       location: collectionItems.location,
       imageUrl: cardPrintsCache.imageSmall,
-      colors: cardPrintsCache.colorIdentity
+      colors: cardPrintsCache.colorIdentity,
+      priceUsd: cardPrintsCache.priceUsd,
+      priceUsdFoil: cardPrintsCache.priceUsdFoil
     })
     .from(collectionItems)
     .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id));
@@ -113,8 +121,14 @@ export async function getCollectionSnapshot(filters: CollectionSnapshotFilters =
   const items: CollectionListItem[] = filtered.map((row) => ({
     ...row,
     colors: parseArray(row.colors),
-    deckNames: [...(deckNamesByPrintId.get(row.printId) ?? new Set<string>())].sort((left, right) => left.localeCompare(right))
+    deckNames: [...(deckNamesByPrintId.get(row.printId) ?? new Set<string>())].sort((left, right) => left.localeCompare(right)),
+    itemValue: marketValue(row.priceUsd, row.priceUsdFoil, row.finish, row.quantityTotal)
   })).sort((left, right) => left.name.localeCompare(right.name));
+
+  const valuedItems = items.filter((item) => item.itemValue != null);
+  const totalMarketValue = valuedItems.length > 0
+    ? Math.round(valuedItems.reduce((sum, item) => sum + item.itemValue!, 0) * 100) / 100
+    : null;
 
   return {
     items,
@@ -122,7 +136,8 @@ export async function getCollectionSnapshot(filters: CollectionSnapshotFilters =
       ownedPrints: items.length,
       uniqueCards: new Set(items.map((item) => item.oracleId)).size,
       totalCopies: items.reduce((sum, item) => sum + item.quantityTotal, 0),
-      availableCopies: items.reduce((sum, item) => sum + item.quantityAvailable, 0)
+      availableCopies: items.reduce((sum, item) => sum + item.quantityAvailable, 0),
+      totalMarketValue
     }
   };
 }
@@ -315,6 +330,8 @@ export async function getCollectionPrintDetail(printId: string) {
       oracleText: cardPrintsCache.oracleText,
       imageUrl: cardPrintsCache.imageNormal,
       manaCost: cardPrintsCache.manaCost,
+      priceUsd: cardPrintsCache.priceUsd,
+      priceUsdFoil: cardPrintsCache.priceUsdFoil,
     })
     .from(cardPrintsCache)
     .where(eq(cardPrintsCache.id, printId));
@@ -351,19 +368,31 @@ export async function getCollectionPrintDetail(printId: string) {
     .innerJoin(decks, eq(deckEntries.deckId, decks.id))
     .where(eq(deckEntries.printId, printId));
 
-  return {
-    print,
-    ownedBuckets: ownedBuckets.sort((left, right) => {
+  const enrichedBuckets = ownedBuckets
+    .map((bucket) => ({
+      ...bucket,
+      bucketValue: marketValue(print.priceUsd, print.priceUsdFoil, bucket.finish, bucket.quantityTotal)
+    }))
+    .sort((left, right) => {
       if (left.location !== right.location) {
         return (left.location ?? "").localeCompare(right.location ?? "");
       }
-
       return left.finish.localeCompare(right.finish);
-    }),
+    });
+
+  const bucketValues = enrichedBuckets.map((b) => b.bucketValue).filter((v): v is number => v != null);
+  const totalValue = bucketValues.length > 0
+    ? Math.round(bucketValues.reduce((sum, v) => sum + v, 0) * 100) / 100
+    : null;
+
+  return {
+    print,
+    ownedBuckets: enrichedBuckets,
     summary: {
       totalCopies: ownedBuckets.reduce((sum, bucket) => sum + bucket.quantityTotal, 0),
       availableCopies: ownedBuckets.reduce((sum, bucket) => sum + bucket.quantityAvailable, 0),
-      bucketCount: ownedBuckets.length
+      bucketCount: ownedBuckets.length,
+      totalValue
     },
     usedInDecks
   };

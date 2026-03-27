@@ -2,11 +2,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { addPrintToDeckAction, deleteCollectionPrintAction, updateCollectionBucketAction } from "@/app/collection/actions";
+import { addPrintToDeckAction, deleteCollectionPrintAction, refreshPrintPricesAction, updateCollectionBucketAction } from "@/app/collection/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
+import { RefreshPricesButton } from "@/components/ui/refresh-prices-button";
 import { Input } from "@/components/ui/input";
 import { ManaCost } from "@/components/ui/mana-cost";
 import { collectionConditions, collectionFinishes, getCollectionPrintDetail } from "@/lib/collection/service";
@@ -17,7 +18,7 @@ export default async function CollectionPrintPage({
   searchParams
 }: {
   params: { printId: string };
-  searchParams?: { updated?: string; error?: string; added?: string };
+  searchParams?: { updated?: string; error?: string; added?: string; pricesRefreshed?: string };
 }) {
   const [detail, decks] = await Promise.all([
     getCollectionPrintDetail(params.printId),
@@ -39,6 +40,12 @@ export default async function CollectionPrintPage({
       {searchParams?.added === "1" ? (
         <Card className="border-emerald-500/30 bg-emerald-500/10">
           <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card added to deck.</CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.pricesRefreshed === "1" ? (
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Prices refreshed.</CardContent>
         </Card>
       ) : null}
 
@@ -103,6 +110,30 @@ export default async function CollectionPrintPage({
                   <p className="mt-3 text-2xl font-semibold">
                     {detail.summary.totalCopies} total · {detail.summary.availableCopies} free
                   </p>
+                </div>
+                <div className="rounded-2xl bg-card p-4 sm:col-span-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Est. market value</p>
+                      <p className="mt-3 text-2xl font-semibold tabular-nums">
+                        {detail.summary.totalValue != null
+                          ? `$${detail.summary.totalValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : "—"}
+                      </p>
+                      {detail.print.priceUsd != null ? (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          ${detail.print.priceUsd.toFixed(2)} nonfoil
+                          {detail.print.priceUsdFoil != null ? ` · $${detail.print.priceUsdFoil.toFixed(2)} foil` : ""}
+                        </p>
+                      ) : null}
+                    </div>
+                    <form action={refreshPrintPricesAction} className="shrink-0">
+                      <input name="printId" type="hidden" value={detail.print.printId} />
+                      <RefreshPricesButton size="sm" variant="outline">
+                        Refresh price
+                      </RefreshPricesButton>
+                    </form>
+                  </div>
                 </div>
               </CardContent>
             </Card>

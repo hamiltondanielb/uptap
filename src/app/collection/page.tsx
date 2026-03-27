@@ -2,6 +2,8 @@ import { CollectionFilters } from "@/components/collection/collection-filters";
 import { CollectionInventoryTable } from "@/components/collection/collection-inventory-table";
 import { CollectionPagination } from "@/components/collection/collection-pagination";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { refreshCollectionPricesAction } from "@/app/collection/actions";
+import { RefreshPricesButton } from "@/components/ui/refresh-prices-button";
 import { buildCollectionFilterSearchParams, normalizeCollectionSnapshotFilters } from "@/lib/collection/filters";
 import { getCollectionSnapshot } from "@/lib/collection/service";
 import { getDeckSummaries } from "@/lib/decks/service";
@@ -11,7 +13,7 @@ const PAGE_SIZE = 50;
 export default async function CollectionPage({
   searchParams
 }: {
-  searchParams?: { q?: string; updated?: string; deleted?: string; error?: string; deckFilterMode?: string; deckId?: string; page?: string };
+  searchParams?: { q?: string; updated?: string; deleted?: string; error?: string; deckFilterMode?: string; deckId?: string; page?: string; pricesRefreshed?: string };
 }) {
   const filters = normalizeCollectionSnapshotFilters({
     query: searchParams?.q,
@@ -38,15 +40,30 @@ export default async function CollectionPage({
             without leaving the page.
           </p>
         </div>
-        <CollectionFilters
-          clearHref="/collection"
-          deckFilterMode={filters.deckFilterMode}
-          deckId={filters.deckId}
-          decks={decks.map((deck) => ({ id: deck.id, name: deck.name }))}
-          exportHref={exportHref}
-          query={filters.query}
-        />
+        <div className="flex flex-wrap items-end gap-3">
+          <CollectionFilters
+            clearHref="/collection"
+            deckFilterMode={filters.deckFilterMode}
+            deckId={filters.deckId}
+            decks={decks.map((deck) => ({ id: deck.id, name: deck.name }))}
+            exportHref={exportHref}
+            query={filters.query}
+          />
+          <form action={refreshCollectionPricesAction}>
+            <RefreshPricesButton variant="outline" size="sm">
+              Refresh prices
+            </RefreshPricesButton>
+          </form>
+        </div>
       </section>
+
+      {searchParams?.pricesRefreshed != null ? (
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">
+            Prices updated for {searchParams.pricesRefreshed} {Number(searchParams.pricesRefreshed) === 1 ? "print" : "prints"}.
+          </CardContent>
+        </Card>
+      ) : null}
 
       {searchParams?.updated === "1" ? (
         <Card className="border-emerald-300/70 bg-emerald-50">
@@ -66,7 +83,7 @@ export default async function CollectionPage({
         </Card>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-4">
+      <section className="grid gap-4 sm:grid-cols-2 md:grid-cols-5">
         <Card>
           <CardHeader className="pb-3">
             <CardDescription>Owned prints</CardDescription>
@@ -89,6 +106,16 @@ export default async function CollectionPage({
           <CardHeader className="pb-3">
             <CardDescription>Available copies</CardDescription>
             <CardTitle>{snapshot.summary.availableCopies}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>Est. market value</CardDescription>
+            <CardTitle>
+              {snapshot.summary.totalMarketValue != null
+                ? `$${snapshot.summary.totalMarketValue.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : "—"}
+            </CardTitle>
           </CardHeader>
         </Card>
       </section>
