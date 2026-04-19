@@ -17,6 +17,10 @@ function csvRow(values: Array<string | number | null | undefined>) {
   return values.map(csvCell).join(",");
 }
 
+function csvCellQuoted(value: string) {
+  return `"${value.replaceAll('"', '""')}"`;
+}
+
 export function safeFilenamePart(value: string, fallback: string) {
   const normalized = value
     .trim()
@@ -30,13 +34,14 @@ export function safeFilenamePart(value: string, fallback: string) {
 export function buildCollectionCsv(snapshot: CollectionSnapshot) {
   const lines = [
     csvRow([
-      "name",
+      "Title",
+      "Edition",
+      "Foil",
+      "Quantity",
       "set_code",
-      "set_name",
       "collector_number",
       "finish",
       "condition",
-      "quantity_total",
       "quantity_available",
       "location",
       "oracle_id",
@@ -46,19 +51,20 @@ export function buildCollectionCsv(snapshot: CollectionSnapshot) {
 
   for (const item of snapshot.items) {
     lines.push(
-      csvRow([
-        item.name,
-        item.setCode,
-        item.setName,
-        item.collectorNumber,
-        item.finish,
-        item.condition,
+      [
+        csvCellQuoted(item.name),
+        csvCell(item.setName),
+        item.finish === "foil" || item.finish === "etched" ? 1 : 0,
         item.quantityTotal,
+        csvCell(item.setCode),
+        csvCell(item.collectorNumber),
+        csvCell(item.finish),
+        csvCell(item.condition),
         item.quantityAvailable,
-        item.location,
-        item.oracleId,
-        item.printId
-      ])
+        csvCell(item.location),
+        csvCell(item.oracleId),
+        csvCell(item.printId)
+      ].join(",")
     );
   }
 
@@ -79,6 +85,7 @@ function getDeckExportEntries(detail: DeckDetail) {
       section: "commanders",
       notes: null,
       printId: detail.commander.id,
+      oracleId: detail.commander.oracleId,
       name: detail.commander.name,
       setCode: detail.commander.setCode,
       collectorNumber: detail.commander.collectorNumber,
@@ -87,10 +94,14 @@ function getDeckExportEntries(detail: DeckDetail) {
       imageUrl: detail.commander.imageSmall,
       typeLine: detail.commander.typeLine,
       colorIdentity: detail.commander.colorIdentity,
-      colors: [],
+      colors: [] as string[],
       owned: 0,
       available: 0,
-      shortfall: 0
+      shortfall: 0,
+      inUseCount: 0,
+      inUseDecks: [] as string[],
+      ownedPrintings: [] as Array<{ printId: string; setCode: string; collectorNumber: string; quantity: number; usedInDecks: Array<{ deckId: string; deckName: string }> }>,
+      useCollection: true
     };
 
     if (commandersGroup) {
@@ -118,6 +129,51 @@ export function buildDeckTextExport(detail: DeckDetail) {
 
     for (const entry of group.entries) {
       lines.push(`${entry.quantity} ${entry.name} (${entry.setCode}) ${entry.collectorNumber}`);
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function buildBuyListTextExport(detail: DeckDetail) {
+  const toBuy: Array<{ name: string; setCode: string; collectorNumber: string; quantity: number; reason: "short" | "in-use" }> = [];
+
+  for (const group of getDeckExportEntries(detail)) {
+    for (const entry of group.entries) {
+      if (entry.shortfall <= 0) continue;
+      const reason = entry.owned >= entry.quantity ? "in-use" : "short";
+      const existing = toBuy.find((b) => b.name === entry.name && b.setCode === entry.setCode && b.collectorNumber === entry.collectorNumber);
+      if (existing) {
+        existing.quantity += entry.shortfall;
+      } else {
+        toBuy.push({ name: entry.name, setCode: entry.setCode, collectorNumber: entry.collectorNumber, quantity: entry.shortfall, reason });
+      }
+    }
+  }
+
+  if (toBuy.length === 0) {
+    return `# Buy List — ${detail.deck.name}\n# Nothing to buy — deck is fully covered!\n`;
+  }
+
+  const totalCards = toBuy.reduce((s, b) => s + b.quantity, 0);
+  const lines = [`# Buy List — ${detail.deck.name}`, `# Format: ${detail.deck.format}`, `# ${totalCards} card${totalCards === 1 ? "" : "s"} to acquire`, ""];
+
+  for (const item of toBuy) {
+    const reasonNote = item.reason === "in-use" ? " # in use by another deck" : "";
+    lines.push(`${item.quantity} ${item.name} (${item.setCode}) ${item.collectorNumber}${reasonNote}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+export function buildBuyListCsvExport(detail: DeckDetail) {
+  const lines = [csvRow(["quantity_to_buy", "name", "set_code", "collector_number", "reason", "print_id"])];
+
+  for (const group of getDeckExportEntries(detail)) {
+    for (const entry of group.entries) {
+      if (entry.shortfall <= 0) continue;
+      const reason = entry.owned >= entry.quantity ? "in use" : "short";
+      lines.push(csvRow([entry.shortfall, entry.name, entry.setCode, entry.collectorNumber, reason, entry.printId]));
     }
   }
 

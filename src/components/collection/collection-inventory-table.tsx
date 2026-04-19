@@ -25,6 +25,7 @@ type CollectionInventoryItem = {
   imageUrl: string | null;
   colors: string | string[] | null;
   itemValue: number | null;
+  deckUsage: Array<{ deckId: string; deckName: string }>;
 };
 
 function parseColors(raw: string | string[] | null | undefined): string[] {
@@ -89,6 +90,7 @@ export function CollectionInventoryTable({
             <TableHead>Free</TableHead>
             <TableHead>Value</TableHead>
             <TableHead>Location</TableHead>
+            <TableHead>Decks</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -167,6 +169,23 @@ export function CollectionInventoryTable({
                 </TableCell>
                 <TableCell>
                   <p className="text-sm text-muted-foreground">{item.location ?? "—"}</p>
+                </TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
+                  {item.deckUsage.length > 0 ? (
+                    <div className="flex flex-col gap-0.5">
+                      {item.deckUsage.map((d) => (
+                        <Link
+                          key={d.deckId}
+                          href={`/decks/${d.deckId}`}
+                          className="text-xs text-primary hover:underline truncate max-w-[120px]"
+                        >
+                          {d.deckName}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">—</p>
+                  )}
                 </TableCell>
               </TableRow>
             );

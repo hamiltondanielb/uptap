@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { addPrintToDeckAction, deleteCollectionPrintAction, refreshPrintPricesAction, updateCollectionBucketAction } from "@/app/collection/actions";
+import { addPrintToDeckAction, adjustCollectionBucketQuantityAction, cacheAndReassignCollectionPrintAction, deleteCollectionPrintAction, navigatePrintReassignSearchAction, reassignCollectionPrintAction, refreshPrintPricesAction, removePrintFromDeckAction, updateCollectionBucketAction } from "@/app/collection/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,15 +10,16 @@ import { ConfirmSubmitButton } from "@/components/ui/confirm-submit-button";
 import { RefreshPricesButton } from "@/components/ui/refresh-prices-button";
 import { Input } from "@/components/ui/input";
 import { ManaCost } from "@/components/ui/mana-cost";
-import { collectionConditions, collectionFinishes, getCollectionPrintDetail } from "@/lib/collection/service";
+import { collectionConditions, collectionFinishes, getCachedPrintingsByOracle, getCollectionPrintDetail } from "@/lib/collection/service";
 import { deckSections, getDeckSummaries } from "@/lib/decks/service";
+import { searchCardPrints } from "@/lib/scryfall/client";
 
 export default async function CollectionPrintPage({
   params,
   searchParams
 }: {
   params: { printId: string };
-  searchParams?: { updated?: string; error?: string; added?: string; pricesRefreshed?: string };
+  searchParams?: { updated?: string; error?: string; added?: string; removed?: string; pricesRefreshed?: string; reassigned?: string; pq?: string };
 }) {
   const [detail, decks] = await Promise.all([
     getCollectionPrintDetail(params.printId),
@@ -28,6 +29,12 @@ export default async function CollectionPrintPage({
   if (!detail) {
     notFound();
   }
+
+  const reassignQuery = searchParams?.pq?.trim() ?? "";
+  const [cachedSameOracle, livePrintSearch] = await Promise.all([
+    getCachedPrintingsByOracle(detail.print.oracleId, params.printId),
+    reassignQuery ? searchCardPrints(`!"${reassignQuery}"`) : Promise.resolve({ results: [] as import("@/lib/scryfall/client").ScryfallSearchResult[], error: undefined })
+  ]);
 
   return (
     <div className="space-y-6">
@@ -43,9 +50,21 @@ export default async function CollectionPrintPage({
         </Card>
       ) : null}
 
+      {searchParams?.removed === "1" ? (
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card removed from deck.</CardContent>
+        </Card>
+      ) : null}
+
       {searchParams?.pricesRefreshed === "1" ? (
         <Card className="border-emerald-500/30 bg-emerald-500/10">
           <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Prices refreshed.</CardContent>
+        </Card>
+      ) : null}
+
+      {searchParams?.reassigned === "1" ? (
+        <Card className="border-emerald-500/30 bg-emerald-500/10">
+          <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Printing updated. All collection items have been reassigned to this print.</CardContent>
         </Card>
       ) : null}
 
@@ -146,7 +165,7 @@ export default async function CollectionPrintPage({
               <CardContent className="space-y-3">
                 {detail.usedInDecks.length > 0 ? (
                   detail.usedInDecks.map((deck) => (
-                    <div key={`${deck.deckId}-${deck.section}`} className="rounded-2xl border border-border/70 bg-card p-4">
+                    <div key={deck.entryId} className="rounded-2xl border border-border/70 bg-card p-4">
                       <div className="flex items-center justify-between gap-4">
                         <div className="space-y-1">
                           <Link className="font-medium text-primary hover:underline" href={`/decks/${deck.deckId}`}>
@@ -154,7 +173,35 @@ export default async function CollectionPrintPage({
                           </Link>
                           <p className="text-sm text-muted-foreground">{deck.section}</p>
                         </div>
-                        <Badge variant="outline">{deck.quantity} copies</Badge>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{deck.quantity}×</Badge>
+                          {deck.status === "covered" ? (
+                            <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:text-emerald-400" variant="outline">covered</Badge>
+                          ) : deck.status === "in-use" ? (
+                            <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400" variant="outline">in use elsewhere</Badge>
+                          ) : deck.status === "short" ? (
+                            <Badge className="border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-400" variant="outline">
+                              {deck.shortfall > 1 ? `${deck.shortfall} short` : "short"}
+                            </Badge>
+                          ) : deck.status === "want-more" ? (
+                            <Badge className="border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-400" variant="outline">
+                              {deck.shortfall > 1 ? `${deck.shortfall} short` : "short"}
+                            </Badge>
+                          ) : deck.status === "unallocated" ? (
+                            <Badge variant="outline" className="text-muted-foreground">not claimed</Badge>
+                          ) : null}
+                          <form action={removePrintFromDeckAction}>
+                            <input name="printId" type="hidden" value={detail.print.printId} />
+                            <input name="deckId" type="hidden" value={deck.deckId} />
+                            <input name="entryId" type="hidden" value={deck.entryId} />
+                            <button
+                              className="text-xs text-muted-foreground hover:text-rose-500 transition-colors"
+                              type="submit"
+                            >
+                              Remove
+                            </button>
+                          </form>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -166,6 +213,108 @@ export default async function CollectionPrintPage({
           </section>
         </div>
       </section>
+
+      {detail.otherPrintings.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Other printings in your collection</CardTitle>
+            <CardDescription>Other versions of {detail.print.name} you own.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-3">
+              {detail.otherPrintings.map((p) => (
+                <Link
+                  key={p.printId}
+                  href={`/collection/card/${p.printId}`}
+                  className="flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-2 hover:bg-muted transition-colors"
+                >
+                  {p.imageSmall ? (
+                    <div className="relative h-10 w-7 shrink-0 overflow-hidden rounded bg-muted">
+                      <Image alt={`${p.setCode} #${p.collectorNumber}`} className="object-cover object-top" fill sizes="28px" src={p.imageSmall} />
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="text-sm font-medium">{p.setCode} #{p.collectorNumber}</p>
+                    <p className="text-xs text-muted-foreground">{p.setName} · {p.totalQuantity}×</p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <Card id="change-printing">
+        <CardHeader>
+          <CardTitle>Change printing</CardTitle>
+          <CardDescription>
+            Reassign all collection items for this print to a different version of {detail.print.name}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {cachedSameOracle.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Cached printings</p>
+              <div className="flex flex-wrap gap-3">
+                {cachedSameOracle.map((p) => (
+                  <form key={p.printId} action={reassignCollectionPrintAction}>
+                    <input name="currentPrintId" type="hidden" value={detail.print.printId} />
+                    <input name="newPrintId" type="hidden" value={p.printId} />
+                    <button
+                      className="flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-2 hover:bg-muted transition-colors text-left"
+                      type="submit"
+                    >
+                      {p.imageSmall ? (
+                        <div className="relative h-10 w-7 shrink-0 overflow-hidden rounded bg-muted">
+                          <Image alt={`${p.setCode} #${p.collectorNumber}`} className="object-cover object-top" fill sizes="28px" src={p.imageSmall} />
+                        </div>
+                      ) : null}
+                      <div>
+                        <p className="text-sm font-medium">{p.setCode} #{p.collectorNumber}</p>
+                        <p className="text-xs text-muted-foreground">{p.setName}</p>
+                      </div>
+                    </button>
+                  </form>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Search Scryfall</p>
+            <form action={navigatePrintReassignSearchAction} className="flex flex-col gap-3 sm:flex-row">
+              <input name="currentPrintId" type="hidden" value={detail.print.printId} />
+              <Input defaultValue={reassignQuery} name="pq" placeholder={`Search for ${detail.print.name} printings`} />
+              <Button type="submit" variant="outline">Search</Button>
+            </form>
+
+            {livePrintSearch.results.length > 0 ? (
+              <div className="space-y-3 pt-1">
+                {livePrintSearch.results.map((result) => (
+                  <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
+                    <p className="font-medium">{result.name}</p>
+                    <p className="text-sm text-muted-foreground">{result.setName} · {result.set} #{result.collectorNumber}</p>
+                    <form action={cacheAndReassignCollectionPrintAction} className="mt-3">
+                      <input name="currentPrintId" type="hidden" value={detail.print.printId} />
+                      <input name="query" type="hidden" value={reassignQuery} />
+                      <input name="result" type="hidden" value={JSON.stringify(result)} />
+                      <Button size="sm" type="submit" variant="outline">Use this printing</Button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            ) : reassignQuery ? (
+              <p className="text-sm text-muted-foreground">No results found.</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Results will appear here.</p>
+            )}
+
+            {livePrintSearch.error ? (
+              <p className="text-sm text-muted-foreground">{livePrintSearch.error}</p>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -246,7 +395,7 @@ export default async function CollectionPrintPage({
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <CardTitle>Owned buckets</CardTitle>
-              <CardDescription>Edit the finish, condition, quantities, and location for each owned bucket of this print.</CardDescription>
+              <CardDescription>Adjust quantities and manage each owned bucket of this print.</CardDescription>
             </div>
             <form action={deleteCollectionPrintAction}>
               <input name="printId" type="hidden" value={detail.print.printId} />
@@ -262,59 +411,97 @@ export default async function CollectionPrintPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {detail.ownedBuckets.map((bucket) => (
-            <form key={bucket.id} action={updateCollectionBucketAction} className="rounded-2xl border border-border/70 bg-card p-4">
-              <input name="bucketId" type="hidden" value={bucket.id} />
-              <input name="redirectTo" type="hidden" value="detail" />
-              <input name="redirectPrintId" type="hidden" value={detail.print.printId} />
-              <div className="grid gap-3 md:grid-cols-[110px_110px_150px_180px]">
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Total</span>
-                  <Input defaultValue={String(bucket.quantityTotal)} min="0" name="quantityTotal" type="number" />
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Available</span>
-                  <Input defaultValue={String(bucket.quantityAvailable)} min="0" name="quantityAvailable" type="number" />
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Finish</span>
-                  <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                    defaultValue={bucket.finish}
-                    name="finish"
-                  >
-                    {collectionFinishes.map((finish) => (
-                      <option key={finish} value={finish}>
-                        {finish}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Condition</span>
-                  <select
-                    className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
-                    defaultValue={bucket.condition}
-                    name="condition"
-                  >
-                    {collectionConditions.map((condition) => (
-                      <option key={condition} value={condition}>
-                        {condition.replaceAll("_", " ")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            <div key={bucket.id} className="rounded-2xl border border-border/70 bg-card p-4 space-y-4">
+              {/* Quantity stepper */}
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium capitalize">{bucket.finish} · {bucket.condition.replaceAll("_", " ")}</p>
+                  {bucket.location ? <p className="text-xs text-muted-foreground">{bucket.location}</p> : null}
+                </div>
+                <div className="flex items-center gap-3">
+                  <form action={adjustCollectionBucketQuantityAction}>
+                    <input name="bucketId" type="hidden" value={bucket.id} />
+                    <input name="printId" type="hidden" value={detail.print.printId} />
+                    <input name="delta" type="hidden" value="-1" />
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-muted-foreground hover:border-border hover:text-foreground transition-colors text-base font-medium"
+                      type="submit"
+                    >
+                      −
+                    </button>
+                  </form>
+                  <div className="text-center min-w-[80px]">
+                    <p className="text-lg font-semibold tabular-nums">{bucket.quantityTotal}</p>
+                    <p className="text-xs text-muted-foreground">{bucket.quantityAvailable} free</p>
+                  </div>
+                  <form action={adjustCollectionBucketQuantityAction}>
+                    <input name="bucketId" type="hidden" value={bucket.id} />
+                    <input name="printId" type="hidden" value={detail.print.printId} />
+                    <input name="delta" type="hidden" value="1" />
+                    <button
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-border/60 text-muted-foreground hover:border-border hover:text-foreground transition-colors text-base font-medium"
+                      type="submit"
+                    >
+                      +
+                    </button>
+                  </form>
+                </div>
               </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
-                <label className="space-y-1 text-xs">
-                  <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Location</span>
-                  <Input defaultValue={bucket.location ?? ""} name="location" placeholder="Binder, staples box, deckbox drawer..." />
-                </label>
-                <Button type="submit" variant="outline">
-                  Save bucket
-                </Button>
-              </div>
-              <p className="mt-3 text-xs text-muted-foreground">Set total to 0 to delete this bucket.</p>
-            </form>
+
+              {/* Edit details toggle */}
+              <details className="group">
+                <summary className="cursor-pointer list-none text-xs text-muted-foreground hover:text-foreground transition-colors [&::-webkit-details-marker]:hidden">
+                  Edit details ▾
+                </summary>
+                <form action={updateCollectionBucketAction} className="mt-3 space-y-3">
+                  <input name="bucketId" type="hidden" value={bucket.id} />
+                  <input name="redirectTo" type="hidden" value="detail" />
+                  <input name="redirectPrintId" type="hidden" value={detail.print.printId} />
+                  <div className="grid gap-3 md:grid-cols-[110px_110px_150px_180px]">
+                    <label className="space-y-1 text-xs">
+                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Total</span>
+                      <Input defaultValue={String(bucket.quantityTotal)} min="0" name="quantityTotal" type="number" />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Available</span>
+                      <Input defaultValue={String(bucket.quantityAvailable)} min="0" name="quantityAvailable" type="number" />
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Finish</span>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                        defaultValue={bucket.finish}
+                        name="finish"
+                      >
+                        {collectionFinishes.map((f) => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-xs">
+                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Condition</span>
+                      <select
+                        className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                        defaultValue={bucket.condition}
+                        name="condition"
+                      >
+                        {collectionConditions.map((c) => (
+                          <option key={c} value={c}>{c.replaceAll("_", " ")}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                    <label className="space-y-1 text-xs">
+                      <span className="font-medium uppercase tracking-[0.18em] text-muted-foreground">Location</span>
+                      <Input defaultValue={bucket.location ?? ""} name="location" placeholder="Binder, staples box, deckbox drawer..." />
+                    </label>
+                    <Button type="submit" variant="outline">Save</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Set total to 0 to delete this bucket.</p>
+                </form>
+              </details>
+            </div>
           ))}
         </CardContent>
       </Card>

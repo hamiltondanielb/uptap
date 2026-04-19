@@ -78,6 +78,7 @@ function createTables() {
       quantity INTEGER NOT NULL DEFAULT 1,
       section TEXT NOT NULL DEFAULT 'mainboard',
       is_maybeboard INTEGER NOT NULL DEFAULT 0,
+      use_collection INTEGER NOT NULL DEFAULT 1,
       notes TEXT
     );
 
@@ -420,6 +421,14 @@ function migrateAddDeckNotes() {
   }
 }
 
+function migrateAddUseCollection() {
+  try {
+    sqlite.exec(`ALTER TABLE deck_entries ADD COLUMN use_collection INTEGER NOT NULL DEFAULT 1;`);
+  } catch {
+    // column already exists, ignore
+  }
+}
+
 export async function initializeAppData() {
   if (globalThis.__untapBootstrapped) {
     return;
@@ -430,6 +439,7 @@ export async function initializeAppData() {
       createTables();
       migrateAddPriceColumns();
       migrateAddDeckNotes();
+      migrateAddUseCollection();
       await seedDemoData();
       globalThis.__untapBootstrapped = true;
     })();

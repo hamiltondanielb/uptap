@@ -6,6 +6,8 @@ import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
+type OwnedPrinting = { printId: string; setCode: string; collectorNumber: string; quantity: number; usedInDecks: Array<{ deckId: string; deckName: string }> };
+
 type EntryMenuProps = {
   deckId: string;
   entry: {
@@ -14,6 +16,8 @@ type EntryMenuProps = {
     quantity: number;
     section: string;
     owned: number;
+    useCollection: boolean;
+    ownedPrintings: OwnedPrinting[];
   };
   sections: string[];
   query: string;
@@ -21,6 +25,7 @@ type EntryMenuProps = {
   setQuantityAction: (data: FormData) => Promise<void>;
   moveSectionAction: (data: FormData) => Promise<void>;
   addToCollectionAction: (data: FormData) => Promise<void>;
+  toggleUseCollectionAction: (data: FormData) => Promise<void>;
   removeAction: (data: FormData) => Promise<void>;
 };
 
@@ -37,6 +42,7 @@ export function DeckEntryMenu({
   setQuantityAction,
   moveSectionAction,
   addToCollectionAction,
+  toggleUseCollectionAction,
   removeAction
 }: EntryMenuProps) {
   const [open, setOpen] = useState(false);
@@ -61,6 +67,30 @@ export function DeckEntryMenu({
 
       {open ? (
         <div className="absolute right-0 top-full z-50 mt-1 w-56 overflow-hidden rounded-xl border border-border/60 bg-card shadow-lg">
+          {/* Owned printings */}
+          {entry.ownedPrintings.length > 0 ? (
+            <>
+              <div className="p-3">
+                <p className="mb-1.5 text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">Owned printings</p>
+                <div className="space-y-1">
+                  {entry.ownedPrintings.map((p) => (
+                    <div key={p.printId} className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`text-sm ${p.printId === entry.printId ? "font-medium text-foreground" : "text-muted-foreground"}`}>
+                          {p.setCode} #{p.collectorNumber}
+                        </span>
+                        {p.usedInDecks.map((d) => (
+                          <span key={d.deckId} className="rounded px-1 text-[10px] bg-primary/10 text-primary shrink-0 truncate max-w-[80px]" title={d.deckName}>{d.deckName}</span>
+                        ))}
+                      </div>
+                      <span className="text-xs tabular-nums text-muted-foreground shrink-0">{p.quantity}×</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="border-t border-border/40" />
+            </>
+          ) : null}
           {/* Set quantity */}
           <div className="p-3">
             <p className="mb-1.5 text-xs font-medium uppercase tracking-[0.15em] text-muted-foreground">Quantity</p>
@@ -127,6 +157,25 @@ export function DeckEntryMenu({
                     type="submit"
                   >
                     Add to collection
+                  </button>
+                </form>
+              </div>
+            </>
+          ) : null}
+
+          {entry.owned > 0 ? (
+            <>
+              <div className="border-t border-border/40" />
+              <div className="p-1">
+                <form action={toggleUseCollectionAction} onSubmit={() => setOpen(false)}>
+                  <input name="deckId" type="hidden" value={deckId} />
+                  <input name="entryId" type="hidden" value={entry.id} />
+                  <input name="useCollection" type="hidden" value={String(!entry.useCollection)} />
+                  <button
+                    className="flex w-full items-center rounded-lg px-3 py-2 text-sm text-foreground hover:bg-muted"
+                    type="submit"
+                  >
+                    {entry.useCollection ? "Remove collection claim" : "Use my copy"}
                   </button>
                 </form>
               </div>

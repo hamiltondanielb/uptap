@@ -1,16 +1,19 @@
 import Image from "next/image";
 import Link from "next/link";
-import { ChevronDown } from "lucide-react";
+import { CheckCircle2, ChevronDown } from "lucide-react";
 import { notFound } from "next/navigation";
 
 import {
   addDeckEntryAction,
   addDeckPrintToCollectionAction,
+  cacheAndAddDeckEntryAction,
   cacheAndSetDeckCommanderFromSearchAction,
+  navigateScryfallSearchAction,
   removeDeckEntryAction,
   setDeckCommanderAction,
   setDeckEntryQuantityAction,
   updateDeckEntrySectionAction,
+  updateDeckEntryUseCollectionAction,
   updateDeckMetaAction,
   updateDeckNotesAction
 } from "@/app/decks/actions";
@@ -20,7 +23,6 @@ import { DeckBulkPaste } from "@/components/decks/deck-bulk-paste";
 import { DeckEntryMenu } from "@/components/decks/deck-entry-menu";
 import { PrintSearchForm } from "@/components/decks/print-search-form";
 import { Badge } from "@/components/ui/badge";
-import { ManaCost } from "@/components/ui/mana-cost";
 import { ManaSymbol } from "@/components/ui/mana-symbol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -59,13 +61,23 @@ function groupByType<T extends { typeLine?: string | null; quantity: number }>(e
     .map((t) => ({ type: t, entries: map.get(t)! }));
 }
 
+function getCardStatus(entry: { quantity: number; owned: number; shortfall: number; inUseDecks: string[]; useCollection: boolean }) {
+  if (entry.owned === 0) return "missing" as const;
+  if (!entry.useCollection) {
+    // Not claiming from collection — show planning shortfall if copies are all tied up elsewhere
+    return entry.shortfall > 0 ? "want-more" as const : "unallocated" as const;
+  }
+  if (entry.shortfall === 0) return "covered" as const;
+  if (entry.owned >= entry.quantity) return "in-use" as const;
+  return "short" as const;
+}
 
 export default async function DeckDetailPage({
   params,
   searchParams
 }: {
   params: { deckId: string };
-  searchParams?: { q?: string; cq?: string; saved?: string; error?: string; collectionAdded?: string; tab?: string };
+  searchParams?: { q?: string; cq?: string; sq?: string; saved?: string; error?: string; collectionAdded?: string; cardAdded?: string; tab?: string };
 }) {
   const detail = await getDeckDetail(params.deckId);
   if (!detail) {
@@ -75,12 +87,30 @@ export default async function DeckDetailPage({
   const activeTab = searchParams?.tab === "notes" ? "notes" : "editor";
   const query = searchParams?.q?.trim() ?? "";
   const commanderQuery = searchParams?.cq?.trim() ?? "";
+  const scryfallQuery = searchParams?.sq?.trim() ?? "";
 
-  const [searchResults, commanderResults, liveCommanderSearch] = await Promise.all([
+  const buyListText = detail.groupedEntries
+    .flatMap((g) => g.entries)
+    .filter((e) => e.shortfall > 0)
+    .map((e) => `${e.shortfall} ${e.name}`)
+    .join("\n");
+
+  const deckListText = detail.groupedEntries
+    .filter((g) => g.entries.length > 0)
+    .map((g) => [
+      `// ${prettySection(g.section)}`,
+      ...g.entries.map((e) => `${e.quantity} ${e.name}`)
+    ].join("\n"))
+    .join("\n\n");
+
+  const [searchResults, commanderResults, liveCommanderSearch, liveScryfallSearch] = await Promise.all([
     query ? searchCachedPrints(query, params.deckId) : Promise.resolve([]),
     commanderQuery ? searchCachedPrints(commanderQuery, params.deckId) : Promise.resolve([]),
     commanderQuery
       ? searchCardPrints(commanderQuery)
+      : Promise.resolve({ results: [] as Awaited<ReturnType<typeof searchCardPrints>>["results"], error: undefined }),
+    scryfallQuery
+      ? searchCardPrints(scryfallQuery)
       : Promise.resolve({ results: [] as Awaited<ReturnType<typeof searchCardPrints>>["results"], error: undefined })
   ]);
   return (
@@ -96,16 +126,25 @@ export default async function DeckDetailPage({
 
           {/* Stat pills + 3-dot menu */}
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Badge variant={detail.summary.shortfall > 0 ? "warning" : "success"}>
-              {detail.summary.shortfall > 0 ? `${detail.summary.shortfall} cards short` : "Fully covered"}
-            </Badge>
+            {detail.summary.shortfall > 0 ? (
+              <Badge variant="warning">{detail.summary.shortfall} to buy</Badge>
+            ) : null}
+            {detail.summary.inUseShortfall > 0 ? (
+              <Badge variant="outline" className="border-amber-400/50 text-amber-400">{detail.summary.inUseShortfall} cards short</Badge>
+            ) : null}
+            {detail.summary.missingEntries > 0 ? (
+              <Badge variant="outline" className="border-rose-600/50 text-rose-500">{detail.summary.missingEntries} not in collection</Badge>
+            ) : null}
+            {detail.summary.shortfall === 0 && detail.summary.inUseShortfall === 0 ? (
+              <Badge variant="success">Fully covered</Badge>
+            ) : null}
             <Badge variant="outline">{detail.summary.totalCards} tracked cards</Badge>
             <Badge variant="outline">{detail.summary.uniquePrints} unique prints</Badge>
             <Badge variant="outline">{detail.analytics.spellCount} spells · {detail.analytics.landCount} lands</Badge>
             {detail.analytics.averageSpellCmc !== null ? (
               <Badge variant="outline">avg CMC {detail.analytics.averageSpellCmc}</Badge>
             ) : null}
-            <DeckActionsMenu deckId={detail.deck.id} deckName={detail.deck.name} />
+            <DeckActionsMenu deckId={detail.deck.id} deckName={detail.deck.name} buyListText={buyListText} deckListText={deckListText} />
           </div>
 
           {/* Color identity pills */}
@@ -203,6 +242,12 @@ export default async function DeckDetailPage({
             </Card>
           ) : null}
 
+          {searchParams?.cardAdded === "1" ? (
+            <Card className="border-emerald-500/30 bg-emerald-500/10">
+              <CardContent className="p-4 text-sm text-emerald-700 dark:text-emerald-400">Card added to deck.</CardContent>
+            </Card>
+          ) : null}
+
           {/* Deck editor */}
           <section className="grid gap-6">
             <Card>
@@ -225,88 +270,95 @@ export default async function DeckDetailPage({
                         </Badge>
                       </summary>
 
-                      {/* Entries grouped by card type */}
-                      {groupByType(group.entries).map(({ type, entries: typeEntries }) => (
-                        <div key={type}>
-                          {/* Type sub-header */}
-                          <div className="flex items-center gap-2 border-b border-border/30 px-6 py-1.5">
-                            <span className="text-xs font-medium text-muted-foreground">{TYPE_PLURAL[type]}</span>
-                            <span className="text-xs text-muted-foreground/60">
-                              {typeEntries.reduce((s, e) => s + e.quantity, 0)}
-                            </span>
-                          </div>
-
-                          {typeEntries.map((entry) => (
-                            <div
-                              key={entry.id}
-                              className="flex items-center gap-3 border-b border-border/20 px-4 py-2.5 last:border-b-0 hover:bg-muted/40"
-                            >
-                              {/* Card thumbnail with hover preview */}
-                              <CardImagePreview imageUrl={entry.imageUrl} name={entry.name}>
-                                <div className="relative h-10 w-7 shrink-0 overflow-hidden rounded bg-muted">
-                                  {entry.imageUrl ? (
-                                    <Image alt={entry.name} className="object-cover object-top" fill sizes="28px" src={entry.imageUrl} />
-                                  ) : null}
-                                </div>
-                              </CardImagePreview>
-
-                              {/* Mana cost — for lands show color identity symbols, for colorless show nothing */}
-                              <div className="flex w-20 shrink-0 items-center justify-end gap-0.5">
-                                {entry.manaCost ? (
-                                  <ManaCost cost={entry.manaCost} size={14} />
-                                ) : entry.colors.length > 0 ? (
-                                  entry.colors.map((color) => <ManaSymbol key={color} symbol={color} size={14} />)
-                                ) : null}
-                              </div>
-
-                              {/* Card name + type · set */}
-                              {entry.owned > 0 ? (
-                                <Link href={`/collection/card/${entry.printId}`} className="group min-w-0 flex-1">
-                                  <p className="truncate text-sm font-medium leading-snug group-hover:text-primary group-hover:underline">{entry.name}</p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {entry.typeLine ?? ""}{entry.typeLine && entry.setCode ? " · " : ""}{entry.setCode} #{entry.collectorNumber}
-                                  </p>
-                                </Link>
-                              ) : (
-                                <div className="min-w-0 flex-1">
-                                  <p className="truncate text-sm font-medium leading-snug">{entry.name}</p>
-                                  <p className="truncate text-xs text-muted-foreground">
-                                    {entry.typeLine ?? ""}{entry.typeLine && entry.setCode ? " · " : ""}{entry.setCode} #{entry.collectorNumber}
-                                  </p>
-                                </div>
-                              )}
-
-                              {/* Owned / available */}
-                              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                                {entry.available}/{entry.owned}
+                      {/* Entries grouped by card type — multi-column grid */}
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-4 p-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                        {groupByType(group.entries).map(({ type, entries: typeEntries }) => (
+                          <div key={type}>
+                            {/* Type header */}
+                            <div className="mb-1 flex items-center gap-1.5 border-b border-border/40 pb-1">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-foreground">{TYPE_PLURAL[type]}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({typeEntries.reduce((s, e) => s + e.quantity, 0)})
                               </span>
-
-                              {/* Qty */}
-                              <span className="w-6 shrink-0 text-right text-sm font-medium tabular-nums">
-                                {entry.quantity}×
-                              </span>
-
-                              {/* Status */}
-                              <Badge variant={entry.shortfall > 0 ? "warning" : "success"} className="shrink-0">
-                                {entry.shortfall > 0 ? `${entry.shortfall} short` : "Covered"}
-                              </Badge>
-
-                              {/* 3-dot menu */}
-                              <DeckEntryMenu
-                                deckId={detail.deck.id}
-                                entry={entry}
-                                sections={[...deckSections]}
-                                query={query}
-                                commanderQuery={commanderQuery}
-                                setQuantityAction={setDeckEntryQuantityAction}
-                                moveSectionAction={updateDeckEntrySectionAction}
-                                addToCollectionAction={addDeckPrintToCollectionAction}
-                                removeAction={removeDeckEntryAction}
-                              />
                             </div>
-                          ))}
-                        </div>
-                      ))}
+
+                            {/* Compact card rows */}
+                            {typeEntries.map((entry) => {
+                              const status = getCardStatus(entry);
+                              return (
+                                <div
+                                  key={entry.id}
+                                  className="flex items-center gap-1.5 py-0.5 hover:bg-muted/30 rounded px-1 -mx-1"
+                                >
+                                  {/* Qty */}
+                                  <span className="w-4 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                                    {entry.quantity}
+                                  </span>
+
+                                  {/* Card name with hover preview */}
+                                  <CardImagePreview imageUrl={entry.imageUrl} name={entry.name}>
+                                    {entry.owned > 0 ? (
+                                      <Link href={`/collection/card/${entry.printId}`} className="group min-w-0 flex-1">
+                                        <span className="block truncate text-sm leading-snug group-hover:text-primary group-hover:underline">{entry.name}</span>
+                                      </Link>
+                                    ) : (
+                                      <span className="min-w-0 flex-1 truncate text-sm leading-snug">{entry.name}</span>
+                                    )}
+                                  </CardImagePreview>
+
+                                  {/* Status indicator */}
+                                  {status === "covered" ? (
+                                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                                  ) : status === "missing" ? (
+                                    <span className="shrink-0 text-xs font-medium italic text-rose-500">
+                                      not owned
+                                    </span>
+                                  ) : status === "in-use" ? (
+                                    <span
+                                      title={`${entry.inUseCount} cop${entry.inUseCount === 1 ? "y" : "ies"} in use: ${entry.inUseDecks.join(", ")}`}
+                                      className="shrink-0 cursor-help rounded px-1 text-[10px] bg-amber-500/15 text-amber-400"
+                                    >
+                                      in deck
+                                    </span>
+                                  ) : status === "unallocated" ? (
+                                    <span
+                                      title={`You own ${entry.owned} cop${entry.owned === 1 ? "y" : "ies"} but haven't claimed them for this deck`}
+                                      className="shrink-0 cursor-help rounded px-1 text-[10px] bg-muted text-muted-foreground"
+                                    >
+                                      not claimed
+                                    </span>
+                                  ) : status === "want-more" ? (
+                                    <span
+                                      title={`${entry.shortfall} cop${entry.shortfall === 1 ? "y" : "ies"} needed — owned copies are committed to other decks`}
+                                      className="shrink-0 cursor-help text-xs font-medium text-rose-500"
+                                    >
+                                      {entry.shortfall > 1 ? `${entry.shortfall} short` : "short"}
+                                    </span>
+                                  ) : (
+                                    <span className="shrink-0 text-xs font-medium text-rose-500">
+                                      {entry.shortfall > 1 ? `${entry.shortfall} short` : "short"}
+                                    </span>
+                                  )}
+
+                                  {/* 3-dot menu */}
+                                  <DeckEntryMenu
+                                    deckId={detail.deck.id}
+                                    entry={entry}
+                                    sections={[...deckSections]}
+                                    query={query}
+                                    commanderQuery={commanderQuery}
+                                    setQuantityAction={setDeckEntryQuantityAction}
+                                    moveSectionAction={updateDeckEntrySectionAction}
+                                    addToCollectionAction={addDeckPrintToCollectionAction}
+                                    toggleUseCollectionAction={updateDeckEntryUseCollectionAction}
+                                    removeAction={removeDeckEntryAction}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
                     </details>
                   ) : null
                 )}
@@ -359,7 +411,7 @@ export default async function DeckDetailPage({
           </Card>
 
           {/* Collapsible: Edit tools — stays open when a search query is active */}
-          <details id="print-search" className="group rounded-xl border border-border/60 bg-card" open={!!query || !!commanderQuery}>
+          <details id="print-search" className="group rounded-xl border border-border/60 bg-card" open={!!query || !!commanderQuery || !!scryfallQuery || searchParams?.cardAdded === "1"}>
             <summary className="flex cursor-pointer list-none items-center justify-between p-6 [&::-webkit-details-marker]:hidden">
               <div>
                 <p className="text-base font-semibold">Edit</p>
@@ -449,6 +501,74 @@ export default async function DeckDetailPage({
                   ) : (
                     <p className="text-sm text-muted-foreground">Search results will appear here.</p>
                   )}
+                </CardContent>
+              </Card>
+
+              {/* Scryfall search — add any card, even ones not in collection */}
+              <Card id="scryfall-search">
+                <CardHeader>
+                  <CardTitle>Scryfall search</CardTitle>
+                  <CardDescription>
+                    Search Scryfall to add any card, even ones you don&apos;t own yet. Added cards show as short until you add them to your collection via the &hellip; menu.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <form action={navigateScryfallSearchAction} className="flex flex-col gap-3 lg:flex-row">
+                    <input name="deckId" type="hidden" value={detail.deck.id} />
+                    {query ? <input name="q" type="hidden" value={query} /> : null}
+                    {commanderQuery ? <input name="cq" type="hidden" value={commanderQuery} /> : null}
+                    <Input defaultValue={scryfallQuery} name="sq" placeholder="Search Scryfall for any card" />
+                    <Button type="submit" variant="outline">
+                      Search Scryfall
+                    </Button>
+                  </form>
+
+                  {liveScryfallSearch.results.length > 0 ? (
+                    <div className="space-y-3">
+                      {liveScryfallSearch.results.map((result) => (
+                        <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
+                          <p className="font-medium">{result.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {result.setName} · {result.set} #{result.collectorNumber}
+                          </p>
+                          <form action={cacheAndAddDeckEntryAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_120px_120px_auto]">
+                            <input name="deckId" type="hidden" value={detail.deck.id} />
+                            <input name="query" type="hidden" value={scryfallQuery} />
+                            <input name="result" type="hidden" value={JSON.stringify(result)} />
+                            <label className="space-y-2 text-sm">
+                              <span className="font-medium">Section</span>
+                              <select
+                                className="flex h-10 w-full rounded-md border border-input bg-background/80 px-3 py-2 text-sm"
+                                defaultValue="mainboard"
+                                name="section"
+                              >
+                                {deckSections.map((section) => (
+                                  <option key={section} value={section}>
+                                    {prettySection(section)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="space-y-2 text-sm">
+                              <span className="font-medium">Quantity</span>
+                              <Input defaultValue="1" min="1" name="quantity" type="number" />
+                            </label>
+                            <div className="md:col-span-2 md:flex md:items-end">
+                              <Button type="submit">Add to deck</Button>
+                            </div>
+                          </form>
+                        </div>
+                      ))}
+                    </div>
+                  ) : scryfallQuery ? (
+                    <p className="text-sm text-muted-foreground">No Scryfall results found.</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Search results will appear here.</p>
+                  )}
+
+                  {liveScryfallSearch.error ? (
+                    <p className="text-sm text-muted-foreground">{liveScryfallSearch.error}</p>
+                  ) : null}
                 </CardContent>
               </Card>
 

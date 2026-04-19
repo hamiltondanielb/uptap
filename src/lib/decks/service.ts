@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne } from "drizzle-orm";
 
 import { initializeAppData } from "@/lib/db/bootstrap";
 import { db } from "@/lib/db/client";
@@ -215,31 +215,80 @@ function countManaPips(manaCost: string | null, quantity: number) {
 export async function getDeckSummaries() {
   await initializeAppData();
 
-  const availability = await getAvailabilityMap();
-  const deckRows = await db.select().from(decks).orderBy(desc(decks.updatedAt));
-  const entries = await db
-    .select({
-      deckId: deckEntries.deckId,
-      printId: deckEntries.printId,
-      quantity: deckEntries.quantity,
-      colorIdentity: cardPrintsCache.colorIdentity
-    })
-    .from(deckEntries)
-    .leftJoin(cardPrintsCache, eq(deckEntries.printId, cardPrintsCache.id));
-  const tagRows = await db
-    .select({
-      deckId: deckTags.deckId,
-      name: tags.name
-    })
-    .from(deckTags)
-    .innerJoin(tags, eq(deckTags.tagId, tags.id));
+  const [deckRows, entries, tagRows, collectionByOracle] = await Promise.all([
+    db.select().from(decks).orderBy(desc(decks.updatedAt)),
+    db
+      .select({
+        deckId: deckEntries.deckId,
+        quantity: deckEntries.quantity,
+        useCollection: deckEntries.useCollection,
+        oracleId: cardPrintsCache.oracleId,
+        colorIdentity: cardPrintsCache.colorIdentity
+      })
+      .from(deckEntries)
+      .leftJoin(cardPrintsCache, eq(deckEntries.printId, cardPrintsCache.id)),
+    db
+      .select({ deckId: deckTags.deckId, name: tags.name })
+      .from(deckTags)
+      .innerJoin(tags, eq(deckTags.tagId, tags.id)),
+    db
+      .select({ oracleId: cardPrintsCache.oracleId, quantityTotal: collectionItems.quantityTotal })
+      .from(collectionItems)
+      .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id))
+  ]);
+
+  const oracleOwned = collectionByOracle.reduce<Record<string, number>>((acc, item) => {
+    acc[item.oracleId] = (acc[item.oracleId] ?? 0) + item.quantityTotal;
+    return acc;
+  }, {});
+
+  // Oracle-level allocation per deck for useCollection=true entries (for cross-deck conflict detection)
+  const useCollectionEntries = entries.filter((e) => e.useCollection && e.oracleId);
+  const allocationByOracleAndDeck = useCollectionEntries.reduce<Record<string, Record<string, number>>>((acc, e) => {
+    const oracle = e.oracleId!;
+    if (!acc[oracle]) acc[oracle] = {};
+    acc[oracle][e.deckId] = (acc[oracle][e.deckId] ?? 0) + e.quantity;
+    return acc;
+  }, {});
 
   return deckRows.map((deck) => {
     const deckEntriesForDeck = entries.filter((entry) => entry.deckId === deck.id);
-    const shortfall = deckEntriesForDeck.reduce((sum, entry) => {
-      const available = availability[entry.printId]?.available ?? 0;
-      return sum + Math.max(entry.quantity - available, 0);
-    }, 0);
+
+    let toAcquire = 0;   // useCollection=true, owned === 0 OR owned < quantity (truly need more)
+    let inUse = 0;       // useCollection=true, own enough total but copies blocked by other decks
+    let wantMore = 0;    // useCollection=false, planning shortfall (copies tied up elsewhere)
+
+    for (const entry of deckEntriesForDeck) {
+      if (!entry.oracleId) continue;
+      const owned = oracleOwned[entry.oracleId] ?? 0;
+
+      if (!entry.useCollection) {
+        // Compute hypothetical available (what other useCollection=true decks claim)
+        const oracleAlloc = allocationByOracleAndDeck[entry.oracleId] ?? {};
+        const otherClaims = Object.entries(oracleAlloc)
+          .filter(([did]) => did !== deck.id)
+          .reduce((sum, [, q]) => sum + q, 0);
+        const available = Math.max(0, owned - otherClaims);
+        if (available < entry.quantity) wantMore++;
+      } else {
+        if (owned === 0) {
+          toAcquire++;
+        } else {
+          const oracleAlloc = allocationByOracleAndDeck[entry.oracleId] ?? {};
+          const otherClaims = Object.entries(oracleAlloc)
+            .filter(([did]) => did !== deck.id)
+            .reduce((sum, [, q]) => sum + q, 0);
+          const available = Math.max(0, owned - otherClaims);
+          if (available < entry.quantity) {
+            if (owned < entry.quantity) {
+              toAcquire++;
+            } else {
+              inUse++;
+            }
+          }
+        }
+      }
+    }
 
     const colorSet = new Set<string>();
     for (const entry of deckEntriesForDeck) {
@@ -253,7 +302,9 @@ export async function getDeckSummaries() {
     return {
       ...deck,
       totalCards: deckEntriesForDeck.reduce((sum, entry) => sum + entry.quantity, 0),
-      shortfall,
+      shortfall: toAcquire,
+      inUse,
+      wantMore,
       tags: tagRows.filter((tag) => tag.deckId === deck.id).map((tag) => tag.name),
       colorIdentity
     };
@@ -268,14 +319,76 @@ export async function getDeckDetail(deckId: string) {
     return null;
   }
 
-  const availability = await getAvailabilityMap();
+  const [collectionByOracle, otherAllocations, collectionPrintings, allDeckEntries] = await Promise.all([
+    db
+      .select({ oracleId: cardPrintsCache.oracleId, quantityTotal: collectionItems.quantityTotal })
+      .from(collectionItems)
+      .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id)),
+    db
+      .select({ oracleId: cardPrintsCache.oracleId, deckName: decks.name, quantity: deckEntries.quantity })
+      .from(deckEntries)
+      .innerJoin(decks, eq(deckEntries.deckId, decks.id))
+      .innerJoin(cardPrintsCache, eq(deckEntries.printId, cardPrintsCache.id))
+      .where(and(ne(deckEntries.deckId, deckId), eq(deckEntries.useCollection, true))),
+    db
+      .select({
+        oracleId: cardPrintsCache.oracleId,
+        printId: collectionItems.printId,
+        setCode: cardPrintsCache.setCode,
+        collectorNumber: cardPrintsCache.collectorNumber,
+        quantity: collectionItems.quantityTotal
+      })
+      .from(collectionItems)
+      .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id)),
+    db
+      .select({ printId: deckEntries.printId, deckId: deckEntries.deckId, deckName: decks.name })
+      .from(deckEntries)
+      .innerJoin(decks, eq(deckEntries.deckId, decks.id))
+  ]);
+
+  const printIdDeckUsage = allDeckEntries.reduce<Record<string, Array<{ deckId: string; deckName: string }>>>((acc, row) => {
+    if (!acc[row.printId]) acc[row.printId] = [];
+    if (!acc[row.printId].some((d) => d.deckId === row.deckId)) {
+      acc[row.printId].push({ deckId: row.deckId, deckName: row.deckName });
+    }
+    return acc;
+  }, {});
+
+  const ownedPrintingsMap = collectionPrintings.reduce<Record<string, Array<{ printId: string; setCode: string; collectorNumber: string; quantity: number; usedInDecks: Array<{ deckId: string; deckName: string }> }>>>(
+    (acc, row) => {
+      if (!acc[row.oracleId]) acc[row.oracleId] = [];
+      acc[row.oracleId].push({ printId: row.printId, setCode: row.setCode, collectorNumber: row.collectorNumber, quantity: row.quantity, usedInDecks: printIdDeckUsage[row.printId] ?? [] });
+      return acc;
+    },
+    {}
+  );
+
+  const oracleOwned = collectionByOracle.reduce<Record<string, number>>((acc, item) => {
+    acc[item.oracleId] = (acc[item.oracleId] ?? 0) + item.quantityTotal;
+    return acc;
+  }, {});
+
+  const allocatedElsewhere = otherAllocations.reduce<Record<string, { quantity: number; deckNames: string[] }>>(
+    (acc, row) => {
+      if (!acc[row.oracleId]) acc[row.oracleId] = { quantity: 0, deckNames: [] };
+      acc[row.oracleId].quantity += row.quantity;
+      if (!acc[row.oracleId].deckNames.includes(row.deckName)) {
+        acc[row.oracleId].deckNames.push(row.deckName);
+      }
+      return acc;
+    },
+    {}
+  );
+
   const entries = await db
     .select({
       id: deckEntries.id,
       quantity: deckEntries.quantity,
       section: deckEntries.section,
+      useCollection: deckEntries.useCollection,
       notes: deckEntries.notes,
       printId: cardPrintsCache.id,
+      oracleId: cardPrintsCache.oracleId,
       name: cardPrintsCache.name,
       setCode: cardPrintsCache.setCode,
       collectorNumber: cardPrintsCache.collectorNumber,
@@ -303,13 +416,22 @@ export async function getDeckDetail(deckId: string) {
     : null;
 
   const enrichedEntries = entries
-    .map((entry) => ({
-      ...entry,
-      colors: parseColors(entry.colorIdentity),
-      owned: availability[entry.printId]?.total ?? 0,
-      available: availability[entry.printId]?.available ?? 0,
-      shortfall: Math.max(entry.quantity - (availability[entry.printId]?.available ?? 0), 0)
-    }))
+    .map((entry) => {
+      const total = oracleOwned[entry.oracleId] ?? 0;
+      const elsewhere = allocatedElsewhere[entry.oracleId];
+      const usable = Math.max(0, total - (elsewhere?.quantity ?? 0));
+      return {
+        ...entry,
+        colors: parseColors(entry.colorIdentity),
+        owned: total,
+        available: usable,
+        shortfall: Math.max(entry.quantity - usable, 0),
+        inUseCount: Math.min(elsewhere?.quantity ?? 0, total),
+        inUseDecks: elsewhere?.deckNames ?? [] as string[],
+        ownedPrintings: ownedPrintingsMap[entry.oracleId] ?? [] as Array<{ printId: string; setCode: string; collectorNumber: string; quantity: number }>,
+        useCollection: entry.useCollection
+      };
+    })
     .sort((left, right) => left.name.localeCompare(right.name));
 
   const analyticsEntries = [...enrichedEntries];
@@ -329,9 +451,14 @@ export async function getDeckDetail(deckId: string) {
       typeLine: commander.typeLine,
       colorIdentity: commander.colorIdentity,
       colors: parseColors(commander.colorIdentity),
-      owned: availability[commander.id]?.total ?? 0,
-      available: availability[commander.id]?.available ?? 0,
-      shortfall: Math.max(1 - (availability[commander.id]?.available ?? 0), 0)
+      owned: oracleOwned[commander.oracleId] ?? 0,
+      available: Math.max(0, (oracleOwned[commander.oracleId] ?? 0) - (allocatedElsewhere[commander.oracleId]?.quantity ?? 0)),
+      shortfall: Math.max(1 - Math.max(0, (oracleOwned[commander.oracleId] ?? 0) - (allocatedElsewhere[commander.oracleId]?.quantity ?? 0)), 0),
+      inUseCount: Math.min(allocatedElsewhere[commander.oracleId]?.quantity ?? 0, oracleOwned[commander.oracleId] ?? 0),
+      inUseDecks: allocatedElsewhere[commander.oracleId]?.deckNames ?? [] as string[],
+      ownedPrintings: ownedPrintingsMap[commander.oracleId] ?? [] as Array<{ printId: string; setCode: string; collectorNumber: string; quantity: number; usedInDecks: Array<{ deckId: string; deckName: string }> }>,
+      useCollection: true,
+      oracleId: commander.oracleId
     });
   }
 
@@ -392,7 +519,11 @@ export async function getDeckDetail(deckId: string) {
     summary: {
       totalCards: enrichedEntries.reduce((sum, entry) => sum + entry.quantity, 0),
       uniquePrints: enrichedEntries.length,
-      shortfall: enrichedEntries.reduce((sum, entry) => sum + entry.shortfall, 0)
+      shortfall: enrichedEntries.reduce((sum, entry) =>
+        entry.owned < entry.quantity ? sum + Math.max(0, entry.quantity - entry.owned) : sum, 0),
+      inUseShortfall: enrichedEntries.reduce((sum, entry) =>
+        entry.owned >= entry.quantity && entry.shortfall > 0 ? sum + entry.shortfall : sum, 0),
+      missingEntries: enrichedEntries.filter((e) => e.owned === 0).length
     },
     analytics: {
       trackedCards: analyticsTrackedEntries.reduce((sum, entry) => sum + entry.quantity, 0),
@@ -638,8 +769,16 @@ export async function addDeckEntry(input: {
   printId: string;
   quantity: number;
   section: string;
+  useCollection?: boolean;
 }) {
   await initializeAppData();
+
+  // Auto-detect useCollection if not provided: true if we own at least one copy
+  let useCollection = input.useCollection;
+  if (useCollection === undefined) {
+    const owned = await db.select({ id: collectionItems.id }).from(collectionItems).where(eq(collectionItems.printId, input.printId));
+    useCollection = owned.length > 0;
+  }
 
   const existing = await db
     .select()
@@ -660,7 +799,8 @@ export async function addDeckEntry(input: {
       deckId: input.deckId,
       printId: input.printId,
       quantity: input.quantity,
-      section: input.section
+      section: input.section,
+      useCollection
     });
   }
 
@@ -711,6 +851,13 @@ export async function commitDeckBulkPaste(input: {
     throw new Error("One or more matched prints are no longer cached.");
   }
 
+  // Determine which prints are owned (for auto-setting useCollection)
+  const ownedItems = await db
+    .select({ printId: collectionItems.printId })
+    .from(collectionItems)
+    .where(inArray(collectionItems.printId, uniquePrintIds));
+  const ownedPrintIds = new Set(ownedItems.map((item) => item.printId));
+
   const quantitiesByPrintAndSection = normalizedRows.reduce<Record<string, number>>((acc, row) => {
     const key = `${row.printId}::${row.section}`;
     acc[key] = (acc[key] ?? 0) + row.quantity;
@@ -741,7 +888,8 @@ export async function commitDeckBulkPaste(input: {
       deckId: input.deckId,
       printId,
       quantity,
-      section
+      section,
+      useCollection: ownedPrintIds.has(printId)
     });
   }
 
@@ -796,5 +944,15 @@ export async function removeDeckEntry(input: { deckId: string; entryId: string }
     .set({
       updatedAt: new Date().toISOString()
     })
+    .where(eq(decks.id, input.deckId));
+}
+
+export async function updateDeckEntryUseCollection(input: { deckId: string; entryId: string; useCollection: boolean }) {
+  await initializeAppData();
+
+  await db.update(deckEntries).set({ useCollection: input.useCollection }).where(eq(deckEntries.id, input.entryId));
+  await db
+    .update(decks)
+    .set({ updatedAt: new Date().toISOString() })
     .where(eq(decks.id, input.deckId));
 }

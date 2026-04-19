@@ -89,6 +89,7 @@ export const deckEntries = sqliteTable(
     quantity: integer("quantity").notNull().default(1),
     section: text("section").notNull().default("mainboard"),
     isMaybeboard: integer("is_maybeboard", { mode: "boolean" }).notNull().default(false),
+    useCollection: integer("use_collection", { mode: "boolean" }).notNull().default(true),
     notes: text("notes")
   },
   (table) => ({

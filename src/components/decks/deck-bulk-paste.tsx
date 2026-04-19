@@ -320,6 +320,10 @@ export function DeckBulkPaste({
                                 <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400" variant="outline">
                                   Not in collection yet
                                 </Badge>
+                              ) : row.matchSource === "collection" ? (
+                                <Badge className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400" variant="outline">
+                                  Will use your copy
+                                </Badge>
                               ) : null}
                             </div>
                           </>
@@ -339,6 +343,12 @@ export function DeckBulkPaste({
                         Line {row.lineNumber} · {row.original}
                       </p>
                       <p className="text-sm text-amber-700 dark:text-amber-400">{row.reason}</p>
+                      <a
+                        href={`/decks/${deckId}?sq=${encodeURIComponent(row.name)}`}
+                        className="mt-1 inline-block text-xs text-primary hover:underline"
+                      >
+                        Search Scryfall →
+                      </a>
                     </div>
                   ))}
                 </div>

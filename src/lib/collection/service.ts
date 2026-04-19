@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 
 import { initializeAppData } from "@/lib/db/bootstrap";
 import { db } from "@/lib/db/client";
@@ -26,6 +26,7 @@ export type CollectionListItem = {
   imageUrl: string | null;
   colors: string[];
   deckNames: string[];
+  deckUsage: Array<{ deckId: string; deckName: string }>;
   itemValue: number | null;
 };
 
@@ -90,6 +91,14 @@ export async function getCollectionSnapshot(filters: CollectionSnapshotFilters =
     acc.set(row.printId, names);
     return acc;
   }, new Map());
+  const decksByPrintId = deckUsageRows.reduce<Map<string, Array<{ deckId: string; deckName: string }>>>((acc, row) => {
+    const existing = acc.get(row.printId) ?? [];
+    if (!existing.some((d) => d.deckId === row.deckId)) {
+      existing.push({ deckId: row.deckId, deckName: row.deckName });
+    }
+    acc.set(row.printId, existing);
+    return acc;
+  }, new Map());
   const canApplySelectedDeckFilter = collectionFilterNeedsDeck(normalized.deckFilterMode) && Boolean(normalized.deckId);
 
   const filtered = rows.filter((row) => {
@@ -122,6 +131,7 @@ export async function getCollectionSnapshot(filters: CollectionSnapshotFilters =
     ...row,
     colors: parseArray(row.colors),
     deckNames: [...(deckNamesByPrintId.get(row.printId) ?? new Set<string>())].sort((left, right) => left.localeCompare(right)),
+    deckUsage: (decksByPrintId.get(row.printId) ?? []).sort((a, b) => a.deckName.localeCompare(b.deckName)),
     itemValue: marketValue(row.priceUsd, row.priceUsdFoil, row.finish, row.quantityTotal)
   })).sort((left, right) => left.name.localeCompare(right.name));
 
@@ -151,6 +161,12 @@ export const collectionConditions = [
   "heavily_played",
   "damaged"
 ] as const;
+
+export async function getCollectionBucket(bucketId: string) {
+  await initializeAppData();
+  const [bucket] = await db.select().from(collectionItems).where(eq(collectionItems.id, bucketId));
+  return bucket ?? null;
+}
 
 export async function updateCollectionBucket(input: {
   bucketId: string;
@@ -288,6 +304,45 @@ export async function deleteCollectionPrint(printId: string) {
   };
 }
 
+export async function getCachedPrintingsByOracle(oracleId: string, excludePrintId: string) {
+  await initializeAppData();
+  return db
+    .select({
+      printId: cardPrintsCache.id,
+      setCode: cardPrintsCache.setCode,
+      setName: cardPrintsCache.setName,
+      collectorNumber: cardPrintsCache.collectorNumber,
+      imageSmall: cardPrintsCache.imageSmall,
+    })
+    .from(cardPrintsCache)
+    .where(and(eq(cardPrintsCache.oracleId, oracleId), ne(cardPrintsCache.id, excludePrintId)));
+}
+
+export async function reassignCollectionPrint(currentPrintId: string, newPrintId: string) {
+  await initializeAppData();
+
+  const [newPrint] = await db.select({ id: cardPrintsCache.id }).from(cardPrintsCache).where(eq(cardPrintsCache.id, newPrintId));
+  if (!newPrint) {
+    throw new Error("Target print is not cached locally.");
+  }
+
+  const buckets = await db
+    .select({ id: collectionItems.id })
+    .from(collectionItems)
+    .where(eq(collectionItems.printId, currentPrintId));
+
+  if (buckets.length === 0) {
+    throw new Error("No collection items found for the current print.");
+  }
+
+  await db
+    .update(collectionItems)
+    .set({ printId: newPrintId, updatedAt: new Date().toISOString() })
+    .where(eq(collectionItems.printId, currentPrintId));
+
+  return { newPrintId, movedBuckets: buckets.length };
+}
+
 export async function deleteCollectionBuckets(bucketIds: string[]) {
   await initializeAppData();
 
@@ -328,6 +383,7 @@ export async function getCollectionPrintDetail(printId: string) {
       collectorNumber: cardPrintsCache.collectorNumber,
       typeLine: cardPrintsCache.typeLine,
       oracleText: cardPrintsCache.oracleText,
+      oracleId: cardPrintsCache.oracleId,
       imageUrl: cardPrintsCache.imageNormal,
       manaCost: cardPrintsCache.manaCost,
       priceUsd: cardPrintsCache.priceUsd,
@@ -357,16 +413,64 @@ export async function getCollectionPrintDetail(printId: string) {
     return null;
   }
 
-  const usedInDecks = await db
+  const usedInDecksRaw = await db
     .select({
+      entryId: deckEntries.id,
       deckId: decks.id,
       deckName: decks.name,
       quantity: deckEntries.quantity,
-      section: deckEntries.section
+      section: deckEntries.section,
+      useCollection: deckEntries.useCollection
     })
     .from(deckEntries)
     .innerJoin(decks, eq(deckEntries.deckId, decks.id))
     .where(eq(deckEntries.printId, printId));
+
+  // Compute oracle-level ownership total (all printings of this card)
+  const oracleOwnedRows = await db
+    .select({ quantityTotal: collectionItems.quantityTotal })
+    .from(collectionItems)
+    .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id))
+    .where(eq(cardPrintsCache.oracleId, print.oracleId));
+  const totalOwnedForOracle = oracleOwnedRows.reduce((sum, row) => sum + row.quantityTotal, 0);
+
+  // Compute oracle-level claims from all useCollection=true deck entries
+  const oracleAllocationsRaw = await db
+    .select({
+      deckId: deckEntries.deckId,
+      quantity: deckEntries.quantity,
+    })
+    .from(deckEntries)
+    .innerJoin(cardPrintsCache, eq(deckEntries.printId, cardPrintsCache.id))
+    .where(and(eq(cardPrintsCache.oracleId, print.oracleId), eq(deckEntries.useCollection, true)));
+
+  // Sum claims per deck (useCollection=true only)
+  const allocationByDeck = oracleAllocationsRaw.reduce<Record<string, number>>((acc, row) => {
+    acc[row.deckId] = (acc[row.deckId] ?? 0) + row.quantity;
+    return acc;
+  }, {});
+  const totalUseCollectionClaims = Object.values(allocationByDeck).reduce((sum, q) => sum + q, 0);
+
+  const usedInDecks = usedInDecksRaw.map((entry) => {
+    // Available = owned minus what OTHER useCollection=true decks claim
+    const thisDeckClaim = entry.useCollection ? (allocationByDeck[entry.deckId] ?? 0) : 0;
+    const otherDecksClaim = totalUseCollectionClaims - thisDeckClaim;
+    const available = Math.max(0, totalOwnedForOracle - otherDecksClaim);
+    const shortfall = Math.max(0, entry.quantity - available);
+
+    let status: "covered" | "short" | "in-use" | "want-more" | "unallocated";
+    if (!entry.useCollection) {
+      status = shortfall > 0 ? "want-more" : "unallocated";
+    } else if (shortfall === 0) {
+      status = "covered";
+    } else if (totalOwnedForOracle >= entry.quantity) {
+      status = "in-use";
+    } else {
+      status = "short";
+    }
+
+    return { ...entry, shortfall, status };
+  });
 
   const enrichedBuckets = ownedBuckets
     .map((bucket) => ({
@@ -385,6 +489,45 @@ export async function getCollectionPrintDetail(printId: string) {
     ? Math.round(bucketValues.reduce((sum, v) => sum + v, 0) * 100) / 100
     : null;
 
+  const otherOwnedBuckets = await db
+    .select({
+      printId: cardPrintsCache.id,
+      setCode: cardPrintsCache.setCode,
+      setName: cardPrintsCache.setName,
+      collectorNumber: cardPrintsCache.collectorNumber,
+      imageSmall: cardPrintsCache.imageSmall,
+      quantityTotal: collectionItems.quantityTotal,
+      quantityAvailable: collectionItems.quantityAvailable,
+    })
+    .from(collectionItems)
+    .innerJoin(cardPrintsCache, eq(collectionItems.printId, cardPrintsCache.id))
+    .where(and(eq(cardPrintsCache.oracleId, print.oracleId), ne(cardPrintsCache.id, printId)));
+
+  const otherPrintingsMap = new Map<string, {
+    printId: string; setCode: string; setName: string;
+    collectorNumber: string; imageSmall: string | null;
+    totalQuantity: number; totalAvailable: number;
+  }>();
+  for (const row of otherOwnedBuckets) {
+    const existing = otherPrintingsMap.get(row.printId);
+    if (existing) {
+      existing.totalQuantity += row.quantityTotal;
+      existing.totalAvailable += row.quantityAvailable;
+    } else {
+      otherPrintingsMap.set(row.printId, {
+        printId: row.printId,
+        setCode: row.setCode,
+        setName: row.setName,
+        collectorNumber: row.collectorNumber,
+        imageSmall: row.imageSmall,
+        totalQuantity: row.quantityTotal,
+        totalAvailable: row.quantityAvailable,
+      });
+    }
+  }
+  const otherPrintings = [...otherPrintingsMap.values()]
+    .sort((a, b) => a.setCode.localeCompare(b.setCode));
+
   return {
     print,
     ownedBuckets: enrichedBuckets,
@@ -394,6 +537,7 @@ export async function getCollectionPrintDetail(printId: string) {
       bucketCount: ownedBuckets.length,
       totalValue
     },
-    usedInDecks
+    usedInDecks,
+    otherPrintings
   };
 }

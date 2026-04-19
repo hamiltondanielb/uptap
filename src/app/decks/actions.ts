@@ -12,6 +12,7 @@ import {
   setDeckCommander,
   setDeckEntryQuantity,
   updateDeckEntrySection,
+  updateDeckEntryUseCollection,
   updateDeckMeta,
   updateDeckNotes
 } from "@/lib/decks/service";
@@ -116,7 +117,7 @@ export async function addDeckEntryAction(formData: FormData) {
 
   revalidatePath("/decks");
   revalidatePath(`/decks/${deckId}`);
-  redirect(`/decks/${deckId}?q=${encodeURIComponent(query)}`);
+  redirect(`/decks/${deckId}?cardAdded=1`);
 }
 
 export async function addDeckPrintToCollectionAction(formData: FormData) {
@@ -205,6 +206,22 @@ export async function removeDeckEntryAction(formData: FormData) {
   redirect(`/decks/${deckId}`);
 }
 
+export async function updateDeckEntryUseCollectionAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const entryId = String(formData.get("entryId") ?? "");
+  const useCollection = formData.get("useCollection") === "true";
+
+  try {
+    await updateDeckEntryUseCollection({ deckId, entryId, useCollection });
+  } catch (error) {
+    redirectWithError(`/decks/${deckId}`, error);
+  }
+
+  revalidatePath("/decks");
+  revalidatePath(`/decks/${deckId}`);
+  redirect(`/decks/${deckId}`);
+}
+
 export async function setDeckCommanderAction(formData: FormData) {
   const deckId = String(formData.get("deckId") ?? "");
   const commanderPrintId = String(formData.get("commanderPrintId") ?? "");
@@ -247,6 +264,44 @@ export async function cacheAndSelectCommanderForNewDeckAction(formData: FormData
   }
 
   redirect(`/decks/new?cq=${encodeURIComponent(query)}&commanderId=${encodeURIComponent(commanderId)}`);
+}
+
+export async function navigateScryfallSearchAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const sq = String(formData.get("sq") ?? "").trim();
+  const q = String(formData.get("q") ?? "");
+  const cq = String(formData.get("cq") ?? "");
+
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (cq) params.set("cq", cq);
+  if (sq) params.set("sq", sq);
+
+  redirect(`/decks/${deckId}?${params.toString()}#scryfall-search`);
+}
+
+export async function cacheAndAddDeckEntryAction(formData: FormData) {
+  const deckId = String(formData.get("deckId") ?? "");
+  const section = String(formData.get("section") ?? "mainboard");
+  const quantity = Number.parseInt(String(formData.get("quantity") ?? "1"), 10);
+  const query = String(formData.get("query") ?? "");
+
+  try {
+    const result = parseCommanderResult(formData);
+    await cacheScryfallPrints([result]);
+    await addDeckEntry({
+      deckId,
+      printId: result.id,
+      section,
+      quantity: Number.isFinite(quantity) && quantity > 0 ? quantity : 1
+    });
+  } catch (error) {
+    redirectWithError(`/decks/${deckId}?sq=${encodeURIComponent(query)}#scryfall-search`, error);
+  }
+
+  revalidatePath("/decks");
+  revalidatePath(`/decks/${deckId}`);
+  redirect(`/decks/${deckId}?cardAdded=1#scryfall-search`);
 }
 
 export async function cacheAndSetDeckCommanderFromSearchAction(formData: FormData) {

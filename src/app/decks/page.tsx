@@ -47,12 +47,29 @@ export default async function DecksPage({
             <Link href={`/decks/${deck.id}`} className="absolute inset-0 rounded-xl" aria-label={`Open ${deck.name}`} />
             <Card className="h-full transition-shadow hover:shadow-md">
               <CardContent className="flex h-full flex-col p-5">
-                {/* Top row: format + status badge */}
+                {/* Top row: format + status badges */}
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-xs uppercase tracking-[0.25em] text-muted-foreground">{deck.format}</p>
-                  <Badge variant={deck.shortfall > 0 ? "warning" : "success"} className="shrink-0">
-                    {deck.shortfall > 0 ? `${deck.shortfall} missing` : "In collection"}
-                  </Badge>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                    {deck.shortfall === 0 && deck.inUse === 0 && deck.wantMore === 0 ? (
+                      <Badge variant="success">In collection</Badge>
+                    ) : null}
+                    {deck.shortfall > 0 ? (
+                      <Badge className="border-rose-500/40 bg-rose-500/15 text-rose-700 dark:text-rose-400" variant="outline">
+                        {deck.shortfall} to acquire
+                      </Badge>
+                    ) : null}
+                    {deck.inUse > 0 ? (
+                      <Badge className="border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400" variant="outline">
+                        {deck.inUse} in use
+                      </Badge>
+                    ) : null}
+                    {deck.wantMore > 0 ? (
+                      <Badge className="border-rose-500/40 bg-rose-500/10 text-rose-700/80 dark:text-rose-400/80" variant="outline">
+                        {deck.wantMore} short
+                      </Badge>
+                    ) : null}
+                  </div>
                 </div>
 
                 {/* Deck name */}
