@@ -1,0 +1,3 @@
+#!/bin/bash
+
+docker exec -it untap-dev psql -U untap -d untap

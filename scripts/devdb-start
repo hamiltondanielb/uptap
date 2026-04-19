@@ -1,0 +1,11 @@
+#!/bin/bash
+
+DOCKER=$(command -v docker 2>/dev/null || echo "/Applications/Docker.app/Contents/Resources/bin/docker")
+
+DOCKER_CONFIG=$(mktemp -d) "$DOCKER" run --name untap-dev \
+  -e POSTGRES_USER=untap \
+  -e POSTGRES_PASSWORD=untap \
+  -e POSTGRES_DB=untap \
+  -p 5432:5432 \
+  -v untap-dev-data:/var/lib/postgresql/data \
+  -d postgres:16

@@ -1,19 +1,11 @@
-import path from "node:path";
-import { mkdirSync } from "node:fs";
-
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
+import postgres from "postgres";
+import { drizzle } from "drizzle-orm/postgres-js";
 
 import * as schema from "@/lib/db/schema";
 
-const databaseFile = process.env.DATABASE_FILE ?? path.join(process.cwd(), "data", "untap.db");
+const connectionString =
+  process.env.DATABASE_URL ?? "postgresql://untap:untap@localhost:5432/untap";
 
-mkdirSync(path.dirname(databaseFile), { recursive: true });
+const client = postgres(connectionString);
 
-const sqlite = new Database(databaseFile);
-sqlite.pragma("journal_mode = WAL");
-sqlite.pragma("foreign_keys = ON");
-
-export const db = drizzle(sqlite, { schema });
-export { sqlite, databaseFile };
-
+export const db = drizzle(client, { schema });

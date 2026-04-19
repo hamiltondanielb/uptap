@@ -1,8 +1,11 @@
-import { initializeAppData } from "./bootstrap";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+
+import { db } from "./client";
 
 async function main() {
-  await initializeAppData();
-  console.log("Untap database initialized.");
+  await migrate(db, { migrationsFolder: "./drizzle" });
+  console.log("Migrations applied.");
+  process.exit(0);
 }
 
 main().catch((error) => {

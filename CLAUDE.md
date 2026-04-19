@@ -5,26 +5,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-pnpm dev          # Start development server
-pnpm build        # Production build
-pnpm typecheck    # TypeScript type checking
-pnpm lint         # ESLint
-pnpm test         # Run tests (Node.js native test runner with tsx)
-pnpm db:migrate   # Run Drizzle ORM migrations
-pnpm db:seed      # Seed demo data
+pnpm dev              # Start development server (also starts PostgreSQL if not running)
+pnpm build            # Production build
+pnpm typecheck        # TypeScript type checking
+pnpm lint             # ESLint
+pnpm test             # Run tests (Node.js native test runner with tsx)
+pnpm db:generate      # Generate Drizzle migration files from schema changes
+pnpm db:migrate       # Apply pending migrations to PostgreSQL
+pnpm db:seed          # Seed demo data (idempotent)
 ```
 
 All scripts are thin wrappers in `./scripts/*.sh` that pin the NVM Node binary.
 
 To run a single test file: `node --import tsx/esm --test tests/<file>.test.ts`
 
+### Database workflow
+
+Schema changes: edit `src/lib/db/schema.ts` → `pnpm db:generate` → `pnpm db:migrate`.
+
+One-time SQLite → PostgreSQL data migration:
+```bash
+node --import tsx/esm scripts/migrate-sqlite-to-postgres.ts
+```
+
 ## Architecture
 
 **Untap** is a local-first MTG collection and deck builder. Cards are tracked as exact print+finish inventory items, with deck usage and collection shortfall visibility.
 
-**Stack**: Next.js 14 (App Router) · TypeScript · SQLite via better-sqlite3 + Drizzle ORM · Tailwind CSS + shadcn/ui · Scryfall API
+**Stack**: Next.js 14 (App Router) · TypeScript · PostgreSQL via postgres.js + Drizzle ORM · Tailwind CSS + shadcn/ui · Scryfall API
 
-Database lives at `data/untap.db`. Initialized lazily by `src/lib/db/bootstrap.ts` on first request.
+PostgreSQL runs in Docker (bare `docker run`, no Compose). `scripts/dev.sh` auto-starts the container on `pnpm dev` — creating it on first run, restarting if stopped, skipping if already running. Connect interactively with `scripts/devdb-psql`. Connection string via `DATABASE_URL` in `.env.local`. Migrations live in `./drizzle/`. The app seeds demo data lazily on first request via `src/lib/db/bootstrap.ts`.
 
 ### Data Model (`src/lib/db/schema.ts`)
 
@@ -34,7 +44,7 @@ Database lives at `data/untap.db`. Initialized lazily by `src/lib/db/bootstrap.t
 - `tags` + `deckTags` — Deck categorization
 - `collectionImportJobs` + `collectionImportRows` — State machine for bulk imports
 
-IDs are UUIDs (`crypto.randomUUID()`). Timestamps are ISO 8601 text. Color arrays and similar data are JSON-stringified text columns.
+IDs are UUIDs (`crypto.randomUUID()`). Timestamps are ISO 8601 text. Color arrays (`colors`, `color_identity`) are JSON-stringified text columns. `cmc`, `priceUsd`, `priceUsdFoil` use Drizzle `numeric` (returned as strings — parse with `parseFloat` where needed).
 
 ### Business Logic (`src/lib/`)
 
@@ -57,4 +67,3 @@ Key pages: `/` overview · `/collection` with search/filter · `/collection/impo
 - Path alias: `@/*` → `src/*`
 - Scryfall images proxied via `next.config.mjs` (required for `<Image>` to work)
 - Dark mode via `next-themes` with Tailwind `class` strategy
-- SQLite opened with WAL mode and foreign keys enabled

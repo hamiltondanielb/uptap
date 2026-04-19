@@ -1,6 +1,6 @@
 import { count, eq } from "drizzle-orm";
 
-import { db, sqlite } from "@/lib/db/client";
+import { db } from "@/lib/db/client";
 import { cardPrintsCache, collectionItems, deckEntries, decks, deckTags, tags } from "@/lib/db/schema";
 
 declare global {
@@ -8,123 +8,6 @@ declare global {
   var __untapBootstrapped: boolean | undefined;
   // eslint-disable-next-line no-var
   var __untapBootstrapPromise: Promise<void> | undefined;
-}
-
-function createTables() {
-  sqlite.exec(`
-    CREATE TABLE IF NOT EXISTS card_prints_cache (
-      id TEXT PRIMARY KEY NOT NULL,
-      oracle_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      set_code TEXT NOT NULL,
-      set_name TEXT NOT NULL,
-      collector_number TEXT NOT NULL,
-      rarity TEXT NOT NULL,
-      lang TEXT NOT NULL DEFAULT 'en',
-      released_at TEXT,
-      image_small TEXT,
-      image_normal TEXT,
-      mana_cost TEXT,
-      type_line TEXT,
-      oracle_text TEXT,
-      colors TEXT,
-      color_identity TEXT,
-      cmc REAL,
-      layout TEXT NOT NULL DEFAULT 'normal',
-      scryfall_updated_at TEXT,
-      cached_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS card_prints_cache_oracle_idx ON card_prints_cache (oracle_id);
-    CREATE INDEX IF NOT EXISTS card_prints_cache_name_idx ON card_prints_cache (name);
-
-    CREATE TABLE IF NOT EXISTS collection_items (
-      id TEXT PRIMARY KEY NOT NULL,
-      print_id TEXT NOT NULL REFERENCES card_prints_cache(id) ON DELETE CASCADE,
-      quantity_total INTEGER NOT NULL DEFAULT 0,
-      quantity_available INTEGER NOT NULL DEFAULT 0,
-      finish TEXT NOT NULL DEFAULT 'nonfoil',
-      condition TEXT NOT NULL DEFAULT 'near_mint',
-      language TEXT,
-      is_signed INTEGER NOT NULL DEFAULT 0,
-      is_altered INTEGER NOT NULL DEFAULT 0,
-      is_proxy INTEGER NOT NULL DEFAULT 0,
-      purchase_price_cents INTEGER,
-      acquired_at TEXT,
-      location TEXT,
-      notes TEXT,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS collection_items_print_idx ON collection_items (print_id);
-
-    CREATE TABLE IF NOT EXISTS decks (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL,
-      format TEXT NOT NULL,
-      description TEXT,
-      commander_print_id TEXT REFERENCES card_prints_cache(id),
-      is_archived INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE INDEX IF NOT EXISTS decks_updated_idx ON decks (updated_at);
-
-    CREATE TABLE IF NOT EXISTS deck_entries (
-      id TEXT PRIMARY KEY NOT NULL,
-      deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-      print_id TEXT NOT NULL REFERENCES card_prints_cache(id) ON DELETE CASCADE,
-      quantity INTEGER NOT NULL DEFAULT 1,
-      section TEXT NOT NULL DEFAULT 'mainboard',
-      is_maybeboard INTEGER NOT NULL DEFAULT 0,
-      use_collection INTEGER NOT NULL DEFAULT 1,
-      notes TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS deck_entries_deck_idx ON deck_entries (deck_id);
-    CREATE INDEX IF NOT EXISTS deck_entries_print_idx ON deck_entries (print_id);
-
-    CREATE TABLE IF NOT EXISTS tags (
-      id TEXT PRIMARY KEY NOT NULL,
-      name TEXT NOT NULL UNIQUE,
-      color TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS deck_tags (
-      deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-      tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-      PRIMARY KEY (deck_id, tag_id)
-    );
-
-    CREATE TABLE IF NOT EXISTS collection_import_jobs (
-      id TEXT PRIMARY KEY NOT NULL,
-      source_type TEXT NOT NULL,
-      status TEXT NOT NULL,
-      total_rows INTEGER NOT NULL DEFAULT 0,
-      matched_rows INTEGER NOT NULL DEFAULT 0,
-      ambiguous_rows INTEGER NOT NULL DEFAULT 0,
-      failed_rows INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      completed_at TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS collection_import_rows (
-      id TEXT PRIMARY KEY NOT NULL,
-      job_id TEXT NOT NULL REFERENCES collection_import_jobs(id) ON DELETE CASCADE,
-      original TEXT NOT NULL,
-      quantity INTEGER NOT NULL DEFAULT 1,
-      name TEXT NOT NULL,
-      set_code TEXT,
-      collector_number TEXT,
-      finish TEXT,
-      status TEXT NOT NULL,
-      resolved_print_id TEXT,
-      error_message TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS collection_import_rows_job_idx ON collection_import_rows (job_id);
-  `);
 }
 
 function json(value: string[]) {
@@ -408,27 +291,6 @@ async function seedDemoData() {
   ]);
 }
 
-function migrateAddPriceColumns() {
-  try { sqlite.exec(`ALTER TABLE card_prints_cache ADD COLUMN price_usd REAL;`); } catch {}
-  try { sqlite.exec(`ALTER TABLE card_prints_cache ADD COLUMN price_usd_foil REAL;`); } catch {}
-}
-
-function migrateAddDeckNotes() {
-  try {
-    sqlite.exec(`ALTER TABLE decks ADD COLUMN notes TEXT;`);
-  } catch {
-    // column already exists, ignore
-  }
-}
-
-function migrateAddUseCollection() {
-  try {
-    sqlite.exec(`ALTER TABLE deck_entries ADD COLUMN use_collection INTEGER NOT NULL DEFAULT 1;`);
-  } catch {
-    // column already exists, ignore
-  }
-}
-
 export async function initializeAppData() {
   if (globalThis.__untapBootstrapped) {
     return;
@@ -436,10 +298,6 @@ export async function initializeAppData() {
 
   if (!globalThis.__untapBootstrapPromise) {
     globalThis.__untapBootstrapPromise = (async () => {
-      createTables();
-      migrateAddPriceColumns();
-      migrateAddDeckNotes();
-      migrateAddUseCollection();
       await seedDemoData();
       globalThis.__untapBootstrapped = true;
     })();

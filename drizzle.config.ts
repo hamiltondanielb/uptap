@@ -3,9 +3,8 @@ import { defineConfig } from "drizzle-kit";
 export default defineConfig({
   schema: "./src/lib/db/schema.ts",
   out: "./drizzle",
-  dialect: "sqlite",
+  dialect: "postgresql",
   dbCredentials: {
-    url: process.env.DATABASE_FILE ?? "./data/untap.db"
+    url: process.env.DATABASE_URL ?? "postgresql://untap:untap@localhost:5432/untap"
   }
 });
-

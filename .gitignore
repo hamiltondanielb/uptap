@@ -3,6 +3,7 @@ node_modules
 data/*.db
 data/*.db-*
 .env
+.env.local
 .DS_Store
 dist
 *.tsbuildinfo

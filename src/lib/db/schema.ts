@@ -1,6 +1,6 @@
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { boolean, doublePrecision, index, integer, pgTable, primaryKey, text } from "drizzle-orm/pg-core";
 
-export const cardPrintsCache = sqliteTable(
+export const cardPrintsCache = pgTable(
   "card_prints_cache",
   {
     id: text("id").primaryKey(),
@@ -19,9 +19,9 @@ export const cardPrintsCache = sqliteTable(
     oracleText: text("oracle_text"),
     colors: text("colors"),
     colorIdentity: text("color_identity"),
-    cmc: real("cmc"),
-    priceUsd: real("price_usd"),
-    priceUsdFoil: real("price_usd_foil"),
+    cmc: doublePrecision("cmc"),
+    priceUsd: doublePrecision("price_usd"),
+    priceUsdFoil: doublePrecision("price_usd_foil"),
     layout: text("layout").notNull().default("normal"),
     scryfallUpdatedAt: text("scryfall_updated_at"),
     cachedAt: text("cached_at").notNull().default("CURRENT_TIMESTAMP")
@@ -32,7 +32,7 @@ export const cardPrintsCache = sqliteTable(
   })
 );
 
-export const collectionItems = sqliteTable(
+export const collectionItems = pgTable(
   "collection_items",
   {
     id: text("id").primaryKey(),
@@ -44,9 +44,9 @@ export const collectionItems = sqliteTable(
     finish: text("finish").notNull().default("nonfoil"),
     condition: text("condition").notNull().default("near_mint"),
     language: text("language"),
-    isSigned: integer("is_signed", { mode: "boolean" }).notNull().default(false),
-    isAltered: integer("is_altered", { mode: "boolean" }).notNull().default(false),
-    isProxy: integer("is_proxy", { mode: "boolean" }).notNull().default(false),
+    isSigned: boolean("is_signed").notNull().default(false),
+    isAltered: boolean("is_altered").notNull().default(false),
+    isProxy: boolean("is_proxy").notNull().default(false),
     purchasePriceCents: integer("purchase_price_cents"),
     acquiredAt: text("acquired_at"),
     location: text("location"),
@@ -58,7 +58,7 @@ export const collectionItems = sqliteTable(
   })
 );
 
-export const decks = sqliteTable(
+export const decks = pgTable(
   "decks",
   {
     id: text("id").primaryKey(),
@@ -67,7 +67,7 @@ export const decks = sqliteTable(
     description: text("description"),
     notes: text("notes"),
     commanderPrintId: text("commander_print_id").references(() => cardPrintsCache.id),
-    isArchived: integer("is_archived", { mode: "boolean" }).notNull().default(false),
+    isArchived: boolean("is_archived").notNull().default(false),
     createdAt: text("created_at").notNull().default("CURRENT_TIMESTAMP"),
     updatedAt: text("updated_at").notNull().default("CURRENT_TIMESTAMP")
   },
@@ -76,7 +76,7 @@ export const decks = sqliteTable(
   })
 );
 
-export const deckEntries = sqliteTable(
+export const deckEntries = pgTable(
   "deck_entries",
   {
     id: text("id").primaryKey(),
@@ -88,8 +88,8 @@ export const deckEntries = sqliteTable(
       .references(() => cardPrintsCache.id, { onDelete: "cascade" }),
     quantity: integer("quantity").notNull().default(1),
     section: text("section").notNull().default("mainboard"),
-    isMaybeboard: integer("is_maybeboard", { mode: "boolean" }).notNull().default(false),
-    useCollection: integer("use_collection", { mode: "boolean" }).notNull().default(true),
+    isMaybeboard: boolean("is_maybeboard").notNull().default(false),
+    useCollection: boolean("use_collection").notNull().default(true),
     notes: text("notes")
   },
   (table) => ({
@@ -98,13 +98,13 @@ export const deckEntries = sqliteTable(
   })
 );
 
-export const tags = sqliteTable("tags", {
+export const tags = pgTable("tags", {
   id: text("id").primaryKey(),
   name: text("name").notNull().unique(),
   color: text("color")
 });
 
-export const deckTags = sqliteTable(
+export const deckTags = pgTable(
   "deck_tags",
   {
     deckId: text("deck_id")
@@ -119,7 +119,7 @@ export const deckTags = sqliteTable(
   })
 );
 
-export const collectionImportJobs = sqliteTable("collection_import_jobs", {
+export const collectionImportJobs = pgTable("collection_import_jobs", {
   id: text("id").primaryKey(),
   sourceType: text("source_type").notNull(),
   status: text("status").notNull(),
@@ -131,7 +131,7 @@ export const collectionImportJobs = sqliteTable("collection_import_jobs", {
   completedAt: text("completed_at")
 });
 
-export const collectionImportRows = sqliteTable(
+export const collectionImportRows = pgTable(
   "collection_import_rows",
   {
     id: text("id").primaryKey(),
@@ -152,4 +152,3 @@ export const collectionImportRows = sqliteTable(
     jobIdx: index("collection_import_rows_job_idx").on(table.jobId)
   })
 );
-
