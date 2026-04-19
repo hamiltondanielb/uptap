@@ -8,7 +8,6 @@ import {
   addDeckPrintToCollectionAction,
   cacheAndAddDeckEntryAction,
   cacheAndSetDeckCommanderFromSearchAction,
-  navigateScryfallSearchAction,
   removeDeckEntryAction,
   setDeckCommanderAction,
   setDeckEntryQuantityAction,
@@ -21,13 +20,15 @@ import { CardImagePreview } from "@/components/ui/card-image-preview";
 import { DeckActionsMenu } from "@/components/decks/deck-actions-menu";
 import { DeckBulkPaste } from "@/components/decks/deck-bulk-paste";
 import { DeckEntryMenu } from "@/components/decks/deck-entry-menu";
-import { PrintSearchForm } from "@/components/decks/print-search-form";
+import { CardSearchForm } from "@/components/decks/print-search-form";
 import { Badge } from "@/components/ui/badge";
 import { ManaSymbol } from "@/components/ui/mana-symbol";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { db } from "@/lib/db/client";
+import { collectionItems } from "@/lib/db/schema";
 import { deckFormats, deckSections, getDeckDetail, searchCachedPrints } from "@/lib/decks/service";
 import { searchCardPrints } from "@/lib/scryfall/client";
 import { cn } from "@/lib/utils";
@@ -77,7 +78,7 @@ export default async function DeckDetailPage({
   searchParams
 }: {
   params: { deckId: string };
-  searchParams?: { q?: string; cq?: string; sq?: string; saved?: string; error?: string; collectionAdded?: string; cardAdded?: string; tab?: string };
+  searchParams?: { q?: string; cq?: string; saved?: string; error?: string; collectionAdded?: string; cardAdded?: string; tab?: string };
 }) {
   const detail = await getDeckDetail(params.deckId);
   if (!detail) {
@@ -87,7 +88,6 @@ export default async function DeckDetailPage({
   const activeTab = searchParams?.tab === "notes" ? "notes" : "editor";
   const query = searchParams?.q?.trim() ?? "";
   const commanderQuery = searchParams?.cq?.trim() ?? "";
-  const scryfallQuery = searchParams?.sq?.trim() ?? "";
 
   const buyListText = detail.groupedEntries
     .flatMap((g) => g.entries)
@@ -103,16 +103,26 @@ export default async function DeckDetailPage({
     ].join("\n"))
     .join("\n\n");
 
-  const [searchResults, commanderResults, liveCommanderSearch, liveScryfallSearch] = await Promise.all([
+  const [searchResults, commanderResults, liveCommanderSearch, liveScryfallSearch, cachedPrintIds] = await Promise.all([
     query ? searchCachedPrints(query, params.deckId) : Promise.resolve([]),
     commanderQuery ? searchCachedPrints(commanderQuery, params.deckId) : Promise.resolve([]),
     commanderQuery
       ? searchCardPrints(commanderQuery)
       : Promise.resolve({ results: [] as Awaited<ReturnType<typeof searchCardPrints>>["results"], error: undefined }),
-    scryfallQuery
-      ? searchCardPrints(scryfallQuery)
-      : Promise.resolve({ results: [] as Awaited<ReturnType<typeof searchCardPrints>>["results"], error: undefined })
+    query
+      ? searchCardPrints(query)
+      : Promise.resolve({ results: [] as Awaited<ReturnType<typeof searchCardPrints>>["results"], error: undefined }),
+    // IDs already in the local cache — used to filter Scryfall-only results
+    db.selectDistinct({ printId: collectionItems.printId }).from(collectionItems)
   ]);
+
+  // Set of print IDs already owned — Scryfall results for these are suppressed
+  const ownedPrintIds = new Set(cachedPrintIds.map((r: { printId: string }) => r.printId));
+  // Scryfall results that are NOT already in the user's collection
+  const scryfallOnlyResults = liveScryfallSearch.results.filter((r) => !ownedPrintIds.has(r.id));
+  // Also filter out Scryfall results whose IDs already appear in local cache results (avoid duplication)
+  const cachedResultIds = new Set(searchResults.map((r) => r.id));
+  const newScryfallResults = scryfallOnlyResults.filter((r) => !cachedResultIds.has(r.id));
   return (
     <div className="space-y-6">
       {/* Header: title left, commander image right */}
@@ -411,30 +421,30 @@ export default async function DeckDetailPage({
           </Card>
 
           {/* Collapsible: Edit tools — stays open when a search query is active */}
-          <details id="print-search" className="group rounded-xl border border-border/60 bg-card" open={!!query || !!commanderQuery || !!scryfallQuery || searchParams?.cardAdded === "1"}>
+          <details id="print-search" className="group rounded-xl border border-border/60 bg-card" open={!!query || !!commanderQuery || searchParams?.cardAdded === "1"}>
             <summary className="flex cursor-pointer list-none items-center justify-between p-6 [&::-webkit-details-marker]:hidden">
               <div>
                 <p className="text-base font-semibold">Edit</p>
-                <p className="text-sm text-muted-foreground">Add cached prints, bulk paste, and commander search</p>
+                <p className="text-sm text-muted-foreground">Add cards, bulk paste, and commander search</p>
               </div>
               <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
             </summary>
             <div className="space-y-6 px-6 pb-6">
 
-              {/* Add cached prints */}
-              <Card>
+              {/* Add cards — single search, collection results first then Scryfall */}
+              <Card id="scryfall-search">
                 <CardHeader>
-                  <CardTitle>Add cached prints</CardTitle>
+                  <CardTitle>Add cards</CardTitle>
                   <CardDescription>
-                    Search the local print cache and add exact prints into a section. This keeps the editor usable even when
-                    network access is unavailable.
+                    Searches your collection and Scryfall simultaneously. Owned prints show availability and deck usage. Unowned prints from Scryfall can be added directly.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <PrintSearchForm deckId={detail.deck.id} defaultValue={query} commanderQuery={commanderQuery} />
+                  <CardSearchForm deckId={detail.deck.id} defaultValue={query} commanderQuery={commanderQuery} />
 
-                  {searchResults.length > 0 ? (
+                  {query ? (
                     <div className="space-y-3">
+                      {/* Collection results */}
                       {searchResults.map((result) => (
                         <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
                           <div className="flex items-start justify-between gap-4">
@@ -454,10 +464,14 @@ export default async function DeckDetailPage({
                                 ) : (
                                   <ManaSymbol symbol="C" size={18} />
                                 )}
+                                <Badge variant="outline">In collection</Badge>
                                 <Badge variant={result.available > 0 ? "success" : "warning"}>
                                   {result.available}/{result.owned} available
                                 </Badge>
-                                {result.quantityInDeck > 0 ? <Badge variant="outline">{result.quantityInDeck} already in deck</Badge> : null}
+                                {result.quantityInDeck > 0 ? <Badge variant="outline">{result.quantityInDeck} in this deck</Badge> : null}
+                                {result.usedInDecks.map((usage) => (
+                                  <Badge key={usage.deckName} variant="info">{usage.quantity}/{result.owned} in {usage.deckName}</Badge>
+                                ))}
                               </div>
                             </div>
                             {result.imageUrl ? (
@@ -495,45 +509,40 @@ export default async function DeckDetailPage({
                           </form>
                         </div>
                       ))}
-                    </div>
-                  ) : query ? (
-                    <p className="text-sm text-muted-foreground">No cached prints matched that query yet.</p>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Search results will appear here.</p>
-                  )}
-                </CardContent>
-              </Card>
 
-              {/* Scryfall search — add any card, even ones not in collection */}
-              <Card id="scryfall-search">
-                <CardHeader>
-                  <CardTitle>Scryfall search</CardTitle>
-                  <CardDescription>
-                    Search Scryfall to add any card, even ones you don&apos;t own yet. Added cards show as short until you add them to your collection via the &hellip; menu.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <form action={navigateScryfallSearchAction} className="flex flex-col gap-3 lg:flex-row">
-                    <input name="deckId" type="hidden" value={detail.deck.id} />
-                    {query ? <input name="q" type="hidden" value={query} /> : null}
-                    {commanderQuery ? <input name="cq" type="hidden" value={commanderQuery} /> : null}
-                    <Input defaultValue={scryfallQuery} name="sq" placeholder="Search Scryfall for any card" />
-                    <Button type="submit" variant="outline">
-                      Search Scryfall
-                    </Button>
-                  </form>
-
-                  {liveScryfallSearch.results.length > 0 ? (
-                    <div className="space-y-3">
-                      {liveScryfallSearch.results.map((result) => (
+                      {/* Scryfall-only results (not in collection) */}
+                      {newScryfallResults.map((result) => (
                         <div key={result.id} className="rounded-2xl border border-border/70 bg-card p-4">
-                          <p className="font-medium">{result.name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {result.setName} · {result.set} #{result.collectorNumber}
-                          </p>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium">{result.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {result.setName} · {result.set} #{result.collectorNumber}
+                              </p>
+                              {result.typeLine ? (
+                                <p className="mt-0.5 text-xs text-muted-foreground">{result.typeLine}</p>
+                              ) : null}
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {result.colors.length > 0 ? (
+                                  result.colors.map((color) => (
+                                    <ManaSymbol key={color} symbol={color} size={18} />
+                                  ))
+                                ) : (
+                                  <ManaSymbol symbol="C" size={18} />
+                                )}
+                                <Badge variant="outline">Not owned</Badge>
+                              </div>
+                            </div>
+                            {result.imageUrl ? (
+                              <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-xl bg-slate-950/95">
+                                <Image alt={result.name} className="object-contain" fill sizes="64px" src={result.imageUrl} />
+                              </div>
+                            ) : null}
+                          </div>
+
                           <form action={cacheAndAddDeckEntryAction} className="mt-4 grid gap-3 md:grid-cols-[1fr_120px_120px_auto]">
                             <input name="deckId" type="hidden" value={detail.deck.id} />
-                            <input name="query" type="hidden" value={scryfallQuery} />
+                            <input name="query" type="hidden" value={query} />
                             <input name="result" type="hidden" value={JSON.stringify(result)} />
                             <label className="space-y-2 text-sm">
                               <span className="font-medium">Section</span>
@@ -559,16 +568,16 @@ export default async function DeckDetailPage({
                           </form>
                         </div>
                       ))}
+
+                      {searchResults.length === 0 && newScryfallResults.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          {liveScryfallSearch.error ? liveScryfallSearch.error : "No results found. Try a different search term."}
+                        </p>
+                      ) : null}
                     </div>
-                  ) : scryfallQuery ? (
-                    <p className="text-sm text-muted-foreground">No Scryfall results found.</p>
                   ) : (
                     <p className="text-sm text-muted-foreground">Search results will appear here.</p>
                   )}
-
-                  {liveScryfallSearch.error ? (
-                    <p className="text-sm text-muted-foreground">{liveScryfallSearch.error}</p>
-                  ) : null}
                 </CardContent>
               </Card>
 

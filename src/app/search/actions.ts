@@ -1,9 +1,12 @@
 "use server";
 
+import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { addCollectionBucketFromPrint, collectionConditions, collectionFinishes } from "@/lib/collection/service";
+import { db } from "@/lib/db/client";
+import { collectionItems } from "@/lib/db/schema";
 import { addDeckEntry } from "@/lib/decks/service";
 import { cacheScryfallPrints, type ScryfallSearchResult } from "@/lib/scryfall/client";
 
@@ -44,6 +47,17 @@ export async function addSearchResultToCollectionAction(formData: FormData) {
 
   try {
     const result = parseSearchResult(formData);
+
+    const [existing] = await db
+      .select({ id: collectionItems.id })
+      .from(collectionItems)
+      .where(eq(collectionItems.printId, result.id))
+      .limit(1);
+
+    if (existing) {
+      redirect(`/collection/card/${result.id}`);
+    }
+
     await cacheScryfallPrints([result]);
     await addCollectionBucketFromPrint({
       printId: result.id,

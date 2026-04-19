@@ -546,20 +546,49 @@ export async function searchCachedPrints(query: string, deckId?: string) {
     return [];
   }
 
-  const availability = await getAvailabilityMap();
-  const prints = await db.select().from(cardPrintsCache).orderBy(asc(cardPrintsCache.name));
-  const currentDeckEntries = deckId
-    ? await db
-        .select({
-          printId: deckEntries.printId,
-          quantity: deckEntries.quantity
-        })
-        .from(deckEntries)
-        .where(eq(deckEntries.deckId, deckId))
-    : [];
+  const [collectionRows, prints, currentDeckEntries, deckUsageRows] = await Promise.all([
+    db.select({ printId: collectionItems.printId, quantityTotal: collectionItems.quantityTotal }).from(collectionItems),
+    db.select().from(cardPrintsCache).orderBy(asc(cardPrintsCache.name)),
+    deckId
+      ? db
+          .select({ printId: deckEntries.printId, quantity: deckEntries.quantity })
+          .from(deckEntries)
+          .where(eq(deckEntries.deckId, deckId))
+      : Promise.resolve([] as Array<{ printId: string; quantity: number }>),
+    // decks (other than current) that claim copies via useCollection — include quantity to compute real availability
+    db
+      .select({ printId: deckEntries.printId, deckName: decks.name, quantity: deckEntries.quantity })
+      .from(deckEntries)
+      .innerJoin(decks, eq(deckEntries.deckId, decks.id))
+      .where(and(eq(deckEntries.useCollection, true), deckId ? ne(deckEntries.deckId, deckId) : undefined))
+  ]);
+
+  // Total owned per print from collection
+  const ownedByPrint = collectionRows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.printId] = (acc[row.printId] ?? 0) + row.quantityTotal;
+    return acc;
+  }, {});
+
+  // Quantities allocated to other decks per print
+  const allocatedByPrint = deckUsageRows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.printId] = (acc[row.printId] ?? 0) + row.quantity;
+    return acc;
+  }, {});
 
   const quantityInDeck = currentDeckEntries.reduce<Record<string, number>>((acc, entry) => {
     acc[entry.printId] = (acc[entry.printId] ?? 0) + entry.quantity;
+    return acc;
+  }, {});
+
+  // Map printId → { deckName, quantity } for each deck claiming collection copies
+  const deckUsageByPrint = deckUsageRows.reduce<Record<string, Array<{ deckName: string; quantity: number }>>>((acc, row) => {
+    if (!acc[row.printId]) acc[row.printId] = [];
+    const existing = acc[row.printId].find((d) => d.deckName === row.deckName);
+    if (existing) {
+      existing.quantity += row.quantity;
+    } else {
+      acc[row.printId].push({ deckName: row.deckName, quantity: row.quantity });
+    }
     return acc;
   }, {});
 
@@ -568,21 +597,26 @@ export async function searchCachedPrints(query: string, deckId?: string) {
       `${print.name} ${print.setCode} ${print.setName} ${print.collectorNumber}`.toLowerCase().includes(trimmed)
     )
     .slice(0, 18)
-    .map((print) => ({
-      id: print.id,
-      name: print.name,
-      setCode: print.setCode,
-      setName: print.setName,
-      collectorNumber: print.collectorNumber,
-      imageUrl: print.imageSmall,
-      imageNormal: print.imageNormal,
-      typeLine: print.typeLine,
-      manaCost: print.manaCost,
-      colors: parseColors(print.colorIdentity),
-      owned: availability[print.id]?.total ?? 0,
-      available: availability[print.id]?.available ?? 0,
-      quantityInDeck: quantityInDeck[print.id] ?? 0
-    }));
+    .map((print) => {
+      const owned = ownedByPrint[print.id] ?? 0;
+      const allocated = allocatedByPrint[print.id] ?? 0;
+      return {
+        id: print.id,
+        name: print.name,
+        setCode: print.setCode,
+        setName: print.setName,
+        collectorNumber: print.collectorNumber,
+        imageUrl: print.imageSmall,
+        imageNormal: print.imageNormal,
+        typeLine: print.typeLine,
+        manaCost: print.manaCost,
+        colors: parseColors(print.colorIdentity),
+        owned,
+        available: Math.max(0, owned - allocated),
+        quantityInDeck: quantityInDeck[print.id] ?? 0,
+        usedInDecks: deckUsageByPrint[print.id] ?? [] as Array<{ deckName: string; quantity: number }>
+      };
+    });
 }
 
 export async function previewDeckBulkPaste(input: { deckId: string; raw: string }): Promise<DeckBulkPastePreview> {

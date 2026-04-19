@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-export function PrintSearchForm({
+export function CardSearchForm({
   deckId,
   defaultValue,
   commanderQuery
@@ -27,7 +27,7 @@ export function PrintSearchForm({
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3 lg:flex-row">
-      <Input defaultValue={defaultValue} name="q" placeholder="Search cached prints by name, set, or collector number" />
+      <Input defaultValue={defaultValue} name="q" placeholder="Search by name, set, or collector number" autoFocus={!!defaultValue} />
       <Button type="submit" variant="outline">
         Search
       </Button>

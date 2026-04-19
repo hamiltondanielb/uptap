@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 
 import {
   addSearchResultToCollectionAction,
@@ -10,6 +11,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { collectionConditions, collectionFinishes } from "@/lib/collection/service";
+import { db } from "@/lib/db/client";
+import { collectionItems } from "@/lib/db/schema";
 import { deckSections, getDeckSummaries } from "@/lib/decks/service";
 import { searchCardPrints } from "@/lib/scryfall/client";
 
@@ -19,7 +22,12 @@ export default async function SearchPage({
   searchParams?: { q?: string; cached?: string; addedCollection?: string; addedDeck?: string; error?: string };
 }) {
   const query = searchParams?.q ?? "";
-  const [{ results, error }, decks] = await Promise.all([searchCardPrints(query), getDeckSummaries()]);
+  const [{ results, error }, decks, ownedPrintRows] = await Promise.all([
+    searchCardPrints(query),
+    getDeckSummaries(),
+    db.selectDistinct({ printId: collectionItems.printId }).from(collectionItems)
+  ]);
+  const ownedPrintIds = new Set(ownedPrintRows.map((r: { printId: string }) => r.printId));
 
   return (
     <div className="space-y-6">
@@ -96,34 +104,49 @@ export default async function SearchPage({
 
                 {/* Actions */}
                 <div className="space-y-3 border-t border-border/50 p-4">
-                  {/* Add to collection */}
-                  <form action={addSearchResultToCollectionAction} className="space-y-2">
-                    <input name="query" type="hidden" value={query} />
-                    <input name="result" type="hidden" value={JSON.stringify(result)} />
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="space-y-1 text-xs">
-                        <span className="text-muted-foreground">Qty</span>
-                        <Input className="h-8 w-14 text-sm" defaultValue="1" min="1" name="quantity" type="number" />
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="text-muted-foreground">Finish</span>
-                        <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="nonfoil" name="finish">
-                          {collectionFinishes.map((f) => <option key={f} value={f}>{f}</option>)}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-xs">
-                        <span className="text-muted-foreground">Condition</span>
-                        <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="near_mint" name="condition">
-                          {collectionConditions.map((c) => <option key={c} value={c}>{c.replaceAll("_", " ")}</option>)}
-                        </select>
-                      </label>
-                      <label className="min-w-0 flex-1 space-y-1 text-xs">
-                        <span className="text-muted-foreground">Location</span>
-                        <Input className="h-8 text-sm" defaultValue="Search Intake" name="location" />
-                      </label>
+                  {/* Add to collection — blocked if already owned */}
+                  {ownedPrintIds.has(result.id) ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">In collection</Badge>
+                        <span className="text-xs text-muted-foreground">Adjust quantity on the collection page</span>
+                      </div>
+                      <Link
+                        href={`/collection/card/${result.id}`}
+                        className="inline-flex h-8 w-full items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                      >
+                        View in collection
+                      </Link>
                     </div>
-                    <Button size="sm" type="submit" className="w-full">Add to collection</Button>
-                  </form>
+                  ) : (
+                    <form action={addSearchResultToCollectionAction} className="space-y-2">
+                      <input name="query" type="hidden" value={query} />
+                      <input name="result" type="hidden" value={JSON.stringify(result)} />
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">Qty</span>
+                          <Input className="h-8 w-14 text-sm" defaultValue="1" min="1" name="quantity" type="number" />
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">Finish</span>
+                          <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="nonfoil" name="finish">
+                            {collectionFinishes.map((f) => <option key={f} value={f}>{f}</option>)}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-xs">
+                          <span className="text-muted-foreground">Condition</span>
+                          <select className="flex h-8 rounded-md border border-input bg-background/80 px-2 py-1 text-sm" defaultValue="near_mint" name="condition">
+                            {collectionConditions.map((c) => <option key={c} value={c}>{c.replaceAll("_", " ")}</option>)}
+                          </select>
+                        </label>
+                        <label className="min-w-0 flex-1 space-y-1 text-xs">
+                          <span className="text-muted-foreground">Location</span>
+                          <Input className="h-8 text-sm" defaultValue="Search Intake" name="location" />
+                        </label>
+                      </div>
+                      <Button size="sm" type="submit" className="w-full">Add to collection</Button>
+                    </form>
+                  )}
 
                   {/* Add to deck */}
                   {decks.length > 0 ? (
